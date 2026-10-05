@@ -1,0 +1,14 @@
+{
+  "name": "こども作品ギャラリー",
+  "short_name": "作品ギャラリー",
+  "description": "捨てられない子どもの作品・ことば・プレゼントを写真でしまっておくアプリ",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fff8f0",
+  "theme_color": "#f4845f",
+  "lang": "ja",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
