@@ -170,6 +170,98 @@ const Imaging = (() => {
     return canvas;
   }
 
+  // 手動の微調整：明るさ b（-60〜60）と あざやかさ s（0.4〜2.2）
+  function adjust(canvas, b, s) {
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const im = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const d = im.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const g = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+      d[i] = g + (d[i] - g) * s + b;
+      d[i + 1] = g + (d[i + 1] - g) * s + b;
+      d[i + 2] = g + (d[i + 2] - g) * s + b;
+    }
+    ctx.putImageData(im, 0, 0);
+    return canvas;
+  }
+
+  // 90度回転（dir>0 で右回り）
+  function rotate(src, dir) {
+    const [w, h] = dims(src);
+    const c = document.createElement('canvas');
+    c.width = h; c.height = w;
+    const x = c.getContext('2d');
+    x.translate(h / 2, w / 2);
+    x.rotate(dir > 0 ? Math.PI / 2 : -Math.PI / 2);
+    x.drawImage(src, -w / 2, -h / 2);
+    return c;
+  }
+
+  // 背景の切り抜き：画像のふちと同じ色でつながっている部分だけを透明にする
+  // （絵の中の白い部分は残る）。thr が大きいほど、背景に近い色まで消す。
+  function cutout(src, thr = 60, maxSide = 1200) {
+    const c = toCanvas(src, maxSide);
+    const w = c.width, h = c.height, n = w * h;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    const im = ctx.getImageData(0, 0, w, h);
+    const d = im.data;
+    const R = [], G = [], B = [];
+    const edge = p => { R.push(d[p * 4]); G.push(d[p * 4 + 1]); B.push(d[p * 4 + 2]); };
+    for (let x = 0; x < w; x++) { edge(x); edge((h - 1) * w + x); }
+    for (let y = 0; y < h; y++) { edge(y * w); edge(y * w + w - 1); }
+    const med = a => a.sort((p, q) => p - q)[a.length >> 1];
+    const br = med(R), bg = med(G), bb = med(B);
+    const dist = new Uint16Array(n);
+    for (let p = 0; p < n; p++) dist[p] = Math.abs(d[p * 4] - br) + Math.abs(d[p * 4 + 1] - bg) + Math.abs(d[p * 4 + 2] - bb);
+
+    const bgm = new Uint8Array(n);
+    const stack = new Int32Array(n);
+    let sp = 0;
+    const seed = p => { if (!bgm[p] && dist[p] < thr) { bgm[p] = 1; stack[sp++] = p; } };
+    for (let x = 0; x < w; x++) { seed(x); seed((h - 1) * w + x); }
+    for (let y = 0; y < h; y++) { seed(y * w); seed(y * w + w - 1); }
+    while (sp) {
+      const p = stack[--sp], x = p % w;
+      if (x > 0) seed(p - 1);
+      if (x < w - 1) seed(p + 1);
+      if (p >= w) seed(p - w);
+      if (p < n - w) seed(p + w);
+    }
+    // 背景のきわ（2画素）をなめらかに透かす
+    let near = bgm.slice();
+    for (let pass = 0; pass < 2; pass++) {
+      const nx = near.slice();
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const p = y * w + x;
+          if (near[p]) continue;
+          if ((x > 0 && near[p - 1]) || (x < w - 1 && near[p + 1]) || (y > 0 && near[p - w]) || (y < h - 1 && near[p + w])) nx[p] = 1;
+        }
+      }
+      near = nx;
+    }
+    let x0 = w, y0 = h, x1 = -1, y1 = -1;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const p = y * w + x;
+        let a = 255;
+        if (bgm[p]) a = 0;
+        else if (near[p]) a = Math.max(0, Math.min(255, (dist[p] - thr * 0.4) * 255 / (thr * 0.9)));
+        d[p * 4 + 3] = a;
+        if (a > 8) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      }
+    }
+    ctx.putImageData(im, 0, 0);
+    if (x1 < 0) return null; // 全部が背景と判定された
+    const pad = 4;
+    x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad);
+    x1 = Math.min(w - 1, x1 + pad); y1 = Math.min(h - 1, y1 + pad);
+    const out = document.createElement('canvas');
+    out.width = x1 - x0 + 1; out.height = y1 - y0 + 1;
+    out.getContext('2d').drawImage(c, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+    return out;
+  }
+
   // 連続撮影用：カメラ映像を 64x48 の白黒に縮めた「指紋」
   function frameSig(video, ctx) {
     ctx.drawImage(video, 0, 0, 64, 48);
@@ -184,5 +276,5 @@ const Imaging = (() => {
     return s / a.length;
   }
 
-  return { loadImage, toCanvas, toBlob, detectQuad, warp, enhance, frameSig, diff, dims };
+  return { loadImage, toCanvas, toBlob, detectQuad, warp, enhance, adjust, rotate, cutout, frameSig, diff, dims };
 })();

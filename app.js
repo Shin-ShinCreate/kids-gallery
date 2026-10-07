@@ -142,9 +142,16 @@ async function home() {
   const things = items.filter(i => i.type !== 'word');
   const last = (await DB.get('meta', 'lastBackup'))?.value;
   const needBackup = S.items.length > 0 && (!last || Date.now() - last > 30 * 864e5);
+  // 作品が12点たまるごとに「作品集をつくりませんか」と声をかける（MUSEUMの自動作品集の考え方）
+  const made = Object.fromEntries((await DB.all('meta')).filter(m => m.id.startsWith('bookMade:')).map(m => [m.id.slice(9), m.value]));
+  const bookFor = S.children.map(c => {
+    const n = S.items.filter(i => i.childId === c.id && i.type !== 'word' && i.photos?.length).length;
+    return { c, n, fresh: n - (made[c.id] || 0) };
+  }).filter(x => x.fresh >= 12 && (S.filterChild === 'all' || S.filterChild === x.c.id))[0];
 
   view().innerHTML = `
   ${childChips()}
+  ${bookFor ? `<a class="banner book" href="#book/${bookFor.c.id}">📕 ${esc(bookFor.c.name)}の作品が${bookFor.n}点になりました。作品集（ART BOOK）を自動で作ってみませんか？ →</a>` : ''}
   ${needBackup ? `<a class="banner" href="#settings">💾 ${last ? '前回のバックアップから30日以上たちました' : 'まだ一度も書き出していません'}。思い出を守るために書き出しましょう →</a>` : ''}
   <section class="quick">
     <a href="#add" class="qa big">📷<b>作品を撮ってしまう</b></a>
@@ -152,6 +159,7 @@ async function home() {
     <a href="#words/new" class="qa">💬<b>ことば</b><small>名言・言い間違い</small></a>
     <a href="#add/present" class="qa">🎁<b>プレゼント</b><small>もらった物と言葉</small></a>
     <a href="#boxes" class="qa">📦<b>現物の保管</b><small>箱とQRラベル</small></a>
+    <a href="#book" class="qa wide">📕<b>作品集（ART BOOK）をつくる</b><small>自動レイアウト・A4/A5・PDFで保存</small></a>
   </section>
   ${mem.length ? `<section><h2>📅 思い出のこの日</h2><div class="mem-list">${mem.map(i => {
     const n = ty - parseDate(i.date).y;
@@ -245,6 +253,7 @@ async function item(id) {
       ${i.memo ? `<dt>${i.type === 'word' ? '場面' : 'メモ'}</dt><dd>${esc(i.memo).replace(/\n/g, '<br>')}</dd>` : ''}
     </dl>
     ${i.audio ? `<div class="audio-box"><span>🎙️ ${i.type === 'word' ? 'そのときの声' : '本人の解説'}</span><audio controls data-blob="${i.audio}"></audio></div>` : ''}
+    ${i.type !== 'word' && i.photos?.length ? `<a class="btn wide" href="#goods/${i.id}">🎁 グッズのイメージを作る（背景を切り抜き）</a>` : ''}
     ${i.type !== 'word' ? statusPanel(i) : ''}
     <div class="row"><a class="btn" href="${i.type === 'word' ? '#words/edit/' + i.id : '#edit/' + i.id}">✏️ 編集</a><button class="btn danger" id="del">🗑️ 削除</button></div>
   </div>`;
@@ -456,16 +465,17 @@ function recordModal(title, hint, maxSec = 20) {
 async function openCorrector(file, type) {
   let im;
   try { im = await Imaging.loadImage(file); } catch { toast('この画像は読み込めませんでした'); return null; }
-  const src = Imaging.toCanvas(im, 2400);
+  let src = Imaging.toCanvas(im, 2400);
   const full = () => [{ x: 0, y: 0 }, { x: src.width, y: 0 }, { x: src.width, y: src.height }, { x: 0, y: src.height }];
   const auto = () => Imaging.detectQuad(src).quad || full();
   let quad = auto();
   const flat = ['art', 'shodo', 'present'].includes(type);
+  const adj = { b: 0, s: 1 };
 
   return new Promise(resolve => {
     openModal(`<h2>写真をととのえる</h2>
       <div class="corr-wrap">
-        <div class="corr-stage" id="stage"><canvas id="srcC"></canvas><svg id="qSvg" viewBox="0 0 ${src.width} ${src.height}" preserveAspectRatio="none"></svg></div>
+        <div class="corr-stage" id="stage"><canvas id="srcC"></canvas><svg id="qSvg" preserveAspectRatio="none"></svg></div>
         <div class="corr-result"><canvas id="outC"></canvas><small>できあがり</small></div>
       </div>
       <div class="toggles">
@@ -473,25 +483,39 @@ async function openCorrector(file, type) {
         <label><input type="checkbox" id="tEnh" ${flat ? 'checked' : ''}> 紙を白く・色をくっきり</label>
       </div>
       <p class="hint" id="qHint">● を動かして、作品の四隅に合わせてください</p>
-      <div class="row"><button class="btn small" id="cAuto">🔍 自動で検出</button><button class="btn small" id="cFull">⬜ 写真全体</button></div>
+      <div class="row"><button class="btn small" id="cAuto">🔍 自動で検出</button><button class="btn small" id="cFull">⬜ 写真全体</button><button class="btn small" id="cRotL" aria-label="左に回す">↺ 左へ</button><button class="btn small" id="cRotR" aria-label="右に回す">↻ 右へ</button></div>
+      <div class="sliders">
+        <label>☀️ 明るさ <input type="range" id="sB" min="-50" max="50" value="0"><output id="oB">0</output></label>
+        <label>🎨 あざやかさ <input type="range" id="sS" min="40" max="220" value="100"><output id="oS">100</output></label>
+        <button class="btn small" id="cReset">調整をもどす</button>
+      </div>
       <div class="row"><button class="btn" id="cCancel">やめる</button><button class="btn primary" id="cOk">この写真を使う</button></div>`, 'wide');
 
-    const sc = $('#srcC');
-    const disp = Imaging.toCanvas(src, 900);
-    sc.width = disp.width; sc.height = disp.height;
-    sc.getContext('2d').drawImage(disp, 0, 0);
-    const svg = $('#qSvg');
-    const r = Math.max(src.width, src.height) * 0.03;
+    const sc = $('#srcC'), svg = $('#qSvg');
+    let r = 1;
+    const setupSrc = () => {
+      const disp = Imaging.toCanvas(src, 900);
+      sc.width = disp.width; sc.height = disp.height;
+      sc.getContext('2d').drawImage(disp, 0, 0);
+      svg.setAttribute('viewBox', `0 0 ${src.width} ${src.height}`);
+      r = Math.max(src.width, src.height) * 0.03;
+    };
 
     const process = max => {
-      let c = $('#tWarp').checked ? Imaging.warp(src, quad, max) : Imaging.toCanvas(src, max);
+      const c = $('#tWarp').checked ? Imaging.warp(src, quad, max) : Imaging.toCanvas(src, max);
       if ($('#tEnh').checked) Imaging.enhance(c);
+      if (adj.b || adj.s !== 1) Imaging.adjust(c, adj.b, adj.s);
       return c;
     };
+    let pending = 0;
     const preview = () => {
-      const o = process(480), oc = $('#outC');
-      oc.width = o.width; oc.height = o.height;
-      oc.getContext('2d').drawImage(o, 0, 0);
+      cancelAnimationFrame(pending);
+      pending = requestAnimationFrame(() => {
+        const o = process(480), oc = $('#outC');
+        if (!oc) return;
+        oc.width = o.width; oc.height = o.height;
+        oc.getContext('2d').drawImage(o, 0, 0);
+      });
     };
     const drawQuad = () => {
       const on = $('#tWarp').checked;
@@ -521,6 +545,13 @@ async function openCorrector(file, type) {
     $('#tEnh').onchange = preview;
     $('#cAuto').onclick = () => { quad = auto(); $('#tWarp').checked = true; drawQuad(); preview(); };
     $('#cFull').onclick = () => { quad = full(); drawQuad(); preview(); };
+    const rot = dir => { src = Imaging.rotate(src, dir); quad = auto(); setupSrc(); drawQuad(); preview(); };
+    $('#cRotL').onclick = () => rot(-1);
+    $('#cRotR').onclick = () => rot(1);
+    const sB = $('#sB'), sS = $('#sS');
+    sB.oninput = () => { adj.b = +sB.value; $('#oB').textContent = sB.value; preview(); };
+    sS.oninput = () => { adj.s = sS.value / 100; $('#oS').textContent = sS.value; preview(); };
+    $('#cReset').onclick = () => { sB.value = 0; sS.value = 100; sB.oninput(); sS.oninput(); };
     $('#cCancel').onclick = () => { closeModal(); resolve(null); };
     $('#cOk').onclick = async () => {
       $('#cOk').disabled = true;
@@ -537,6 +568,7 @@ async function openCorrector(file, type) {
         $('#cOk').textContent = 'この写真を使う';
       }
     };
+    setupSrc();
     drawQuad();
     preview();
   });
@@ -1058,33 +1090,293 @@ async function importZip(file) {
   go('#home');
 }
 
-// ---------- 作品集（印刷 / PDF） ----------
-function book(childId) {
-  const kids = childId ? [childById(childId)].filter(Boolean) : S.children;
-  const section = c => {
-    const its = S.items.filter(i => i.childId === c.id).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-    if (!its.length) return '';
-    const groups = new Map();
-    for (const i of its) { const k = i.date ? fiscalYear(i.date) : 0; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(i); }
-    return `<section class="b-cover"><div class="b-ic">🖼️</div><h1>${esc(c.name)}の作品集</h1><p>${esc(its[0].date)} 〜 ${esc(its[its.length - 1].date)}　${its.length}点</p></section>` +
-      [...groups].map(([fy, list]) => `<section class="b-year"><h2>${fy ? fy + '年度　' + gradeLabel(c.birth, fy + '-10-01') : '日付なし'}</h2>
-        <div class="b-grid">${list.filter(i => i.type !== 'word').map(i => `<figure class="b-item">${i.photos?.[0] ? `<img data-blob="${i.photos[0].full}" alt="">` : ''}<figcaption><b>${esc(i.title || TYPES[i.type].label)}</b>　${esc(i.date)}（${esc(ageLabel(c.birth, i.date))}）${i.type === 'present' && i.present?.message ? `<br>「${esc(i.present.message)}」` : ''}${i.memo ? `<br>${esc(i.memo)}` : ''}</figcaption></figure>`).join('')}</div>
-        ${list.filter(i => i.type === 'word').map(i => `<div class="b-word">「${esc(i.word.text)}」<small>${esc(i.date)}・${esc(ageLabel(c.birth, i.date))}</small></div>`).join('')}</section>`).join('');
-  };
-  view().innerHTML = `<div class="no-print"><h1 class="page-title">📕 作品集</h1>
-    ${S.children.length > 1 ? `<div class="chips"><a class="chip ${!childId ? 'on' : ''}" href="#book">みんな</a>${S.children.map(c => `<a class="chip ${childId === c.id ? 'on' : ''}" href="#book/${c.id}">${esc(c.name)}</a>`).join('')}</div>` : ''}
-    <p class="hint">「印刷 / PDFに保存」→ 送信先（プリンター）で「PDFに保存」を選ぶと、PDFの作品集になります。</p>
-    <button class="btn primary" id="doPrint">🖨️ 印刷 / PDFに保存</button></div>
-  <div class="book">${kids.map(section).join('') || '<p class="empty">まだ作品がありません</p>'}</div>`;
-  $('#doPrint').onclick = () => print();
+// ---------- 作品集 ART BOOK（自動レイアウト→印刷 / PDF） ----------
+const B = { child: null, fy: 'all', sel: null, cover: null, size: 'A4', finish: 'standard', per: 'auto', words: true };
+const PAGE_MM = { A4: [210, 297], A5: [148, 210] };
+
+function bookPool(cid) {
+  const all = S.items.filter(i => i.childId === cid && i.type !== 'word' && i.photos?.length)
+    .sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.createdAt - b.createdAt);
+  const fyOf = i => (i.date ? fiscalYear(i.date) : 0);
+  const years = [...new Set(all.map(fyOf))].sort();
+  return { all, years, pool: all.filter(i => B.fy === 'all' || fyOf(i) === +B.fy), fyOf };
+}
+
+async function book(childId) {
+  if (!S.children.length) return go('#home');
+  const cid = childId && childById(childId) ? childId
+    : (B.child && childById(B.child) ? B.child : (S.filterChild !== 'all' ? S.filterChild : S.children[0].id));
+  if (B.child !== cid) Object.assign(B, { child: cid, fy: 'all', sel: null, cover: null });
+  const c = childById(cid);
+  const { all, years, pool } = bookPool(cid);
+  if (!B.sel) B.sel = new Set(pool.map(i => i.id));
+  const chosen = () => pool.filter(i => B.sel.has(i.id));
+  const opt = (key, val, label) => `<button type="button" class="${B[key] === val ? 'on' : ''}" data-k="${key}" data-v="${val}">${label}</button>`;
+
+  view().innerHTML = `<div class="no-print">
+    <h1 class="page-title">📕 作品集（ART BOOK）</h1>
+    ${S.children.length > 1 ? `<div class="chips">${S.children.map(x => `<a class="chip ${x.id === cid ? 'on' : ''}" style="--cc:${x.color}" href="#book/${x.id}">${esc(x.name)}</a>`).join('')}</div>` : ''}
+    ${!all.length ? `<p class="empty">${esc(c.name)}の、写真つきの作品がまだありません。<br>作品をしまうと、ここで自動で作品集になります。</p>` : `
+    <section class="panel"><h2>① しあげ</h2>
+      <div class="opt"><span>サイズ</span><div class="seg" data-g="opt">${opt('size', 'A4', 'A4（大きめ）')}${opt('size', 'A5', 'A5（持ち運び）')}</div></div>
+      <div class="opt"><span>しあげ</span><div class="seg" data-g="opt">${opt('finish', 'standard', 'スタンダード')}${opt('finish', 'premium', '✨プレミアム')}</div></div>
+      <div class="opt"><span>1ページの作品数</span><div class="seg" data-g="opt">${opt('per', 'auto', 'おまかせ')}${opt('per', '1', '1点')}${opt('per', '2', '2点')}${opt('per', '4', '4点')}</div></div>
+      ${years.length > 1 ? `<div class="opt"><span>年度</span><div class="seg wrap" data-g="fy"><button type="button" class="${B.fy === 'all' ? 'on' : ''}" data-v="all">ぜんぶ</button>${years.map(y => `<button type="button" class="${String(B.fy) === String(y) ? 'on' : ''}" data-v="${y}">${y ? y + '年度' : '日付なし'}</button>`).join('')}</div></div>` : ''}
+      <label class="check"><input type="checkbox" id="bWords" ${B.words ? 'checked' : ''}> 「ことば集」のページも入れる</label>
+    </section>
+    <section class="panel"><h2>② のせる作品 <small id="bCount"></small></h2>
+      <p class="hint">タップで入れる／はずす。<b>⭐</b>を押した作品が表紙になります。</p>
+      <div class="pick-grid" id="pickGrid">${pool.map(i => `<div class="pick ${B.sel.has(i.id) ? 'on' : ''}" data-id="${i.id}"><img data-blob="${i.photos[0].thumb}" alt=""><span class="ck">✓</span><button type="button" class="star" data-id="${i.id}" aria-label="表紙にする">⭐</button></div>`).join('')}</div>
+      <div class="row"><button class="btn small" id="pickAll">ぜんぶ選ぶ</button><button class="btn small" id="pickNone">ぜんぶはずす</button></div>
+    </section>
+    <section class="panel"><h2>③ できあがり <small id="bPages"></small></h2>
+      <p class="hint">下のプレビューを確認して、「印刷 / PDFに保存」を押してください。表示された画面で送信先を<b>「PDFに保存」</b>にするとPDFになります。<br>
+      ※ 余白は「なし」、倍率は「100％」にするときれいです。製本の注文機能はまだなく、PDFを印刷所やコンビニ印刷に持ち込む使い方です。</p>
+      <button class="btn primary wide" id="doPrint">🖨️ 印刷 / PDFに保存</button></section>`}
+  </div>
+  <div class="book-pages" id="bookPages"></div>`;
+  if (!all.length) return;
   hydrate(view());
+
+  const upd = () => {
+    $('#bCount').textContent = `${chosen().length} / ${pool.length}点`;
+    renderBookPages(c, chosen());
+  };
+  upd();
+  $$('[data-g=opt] button').forEach(b => { b.onclick = () => { B[b.dataset.k] = b.dataset.v; book(cid); }; });
+  $$('[data-g=fy] button').forEach(b => { b.onclick = () => { B.fy = b.dataset.v; B.sel = null; B.cover = null; book(cid); }; });
+  $('#bWords')?.addEventListener('change', e => { B.words = e.target.checked; upd(); });
+  $('#pickGrid').onclick = e => {
+    const star = e.target.closest('.star');
+    const cell = e.target.closest('.pick');
+    if (!cell) return;
+    const id = cell.dataset.id;
+    if (star) {
+      B.cover = id;
+      B.sel.add(id);
+      cell.classList.add('on');
+      $$('.pick .star').forEach(s => s.classList.toggle('on', s.dataset.id === id));
+      toast('表紙にしました');
+    } else {
+      B.sel.has(id) ? B.sel.delete(id) : B.sel.add(id);
+      cell.classList.toggle('on', B.sel.has(id));
+    }
+    upd();
+  };
+  $$('.pick .star').forEach(s => s.classList.toggle('on', s.dataset.id === B.cover));
+  $('#pickAll').onclick = () => { pool.forEach(i => B.sel.add(i.id)); $$('.pick').forEach(p => p.classList.add('on')); upd(); };
+  $('#pickNone').onclick = () => { B.sel.clear(); $$('.pick').forEach(p => p.classList.remove('on')); upd(); };
+  $('#doPrint').onclick = async () => {
+    if (!chosen().length) return toast('作品を1点以上えらんでください');
+    await DB.put('meta', { id: 'bookMade:' + cid, value: all.length });
+    print();
+  };
+}
+
+function renderBookPages(c, items) {
+  const host = $('#bookPages');
+  const [pw, ph] = PAGE_MM[B.size];
+  let st = $('#pageStyle');
+  if (!st) { st = document.createElement('style'); st.id = 'pageStyle'; document.head.appendChild(st); }
+  st.textContent = `@page { size: ${B.size}; margin: 0; }`;
+  const zoom = Math.min(1, (Math.min(window.innerWidth, 720) - 32) / (pw * 3.7795));
+  host.style.setProperty('--z', zoom);
+  host.style.setProperty('--pw', pw + 'mm');
+  host.style.setProperty('--ph', ph + 'mm');
+  if (!items.length) { host.innerHTML = '<p class="empty no-print">作品が選ばれていません</p>'; $('#bPages').textContent = ''; return; }
+
+  const fyOf = i => (i.date ? fiscalYear(i.date) : 0);
+  const per = B.per === 'auto' ? (items.length <= 6 ? 1 : items.length <= 24 ? 2 : 4) : +B.per;
+  const cover = items.find(i => i.id === B.cover) || items[0];
+  const prem = B.finish === 'premium';
+  const pg = (cls, inner) => `<section class="pg ${B.size} ${prem ? 'premium' : ''} ${cls}">${inner}</section>`;
+  const range = `${items[0].date || ''} 〜 ${items[items.length - 1].date || ''}`;
+  const pages = [];
+
+  pages.push(pg('p-cover', `<div class="cv-art">${`<img data-blob="${cover.photos[0].full}" alt="">`}</div>
+    <h1>${esc(c.name)}の作品集</h1><p>${esc(range)}　${items.length}点</p>`));
+
+  const groups = new Map();
+  for (const i of items) { const k = fyOf(i); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(i); }
+  const chapters = groups.size > 1 || prem;
+  for (const [fy, list] of groups) {
+    if (chapters) {
+      pages.push(pg('p-chapter', `<div><small>${fy ? esc(gradeLabel(c.birth, fy + '-10-01')) : ''}</small><h2>${fy ? fy + '年度' : '日付なし'}</h2><p>${list.length}点</p></div>`));
+    }
+    for (let k = 0; k < list.length; k += per) {
+      const chunk = list.slice(k, k + per);
+      pages.push(pg(`p-works per${per}`, chunk.map(i => `<figure><div class="fig-img"><img data-blob="${i.photos[0].full}" alt=""></div>
+        <figcaption><b>${esc(i.title || TYPES[i.type].label)}</b><span>${esc(i.date || '')}　${esc(ageLabel(c.birth, i.date))}${gradeLabel(c.birth, i.date) ? '・' + esc(gradeLabel(c.birth, i.date)) : ''}</span>
+        ${i.type === 'present' && (i.present?.occasion || i.present?.message) ? `<em>${esc(i.present.occasion || '')}${i.present.message ? '「' + esc(i.present.message) + '」' : ''}</em>` : ''}
+        ${i.memo ? `<span class="memo">${esc(i.memo)}</span>` : ''}</figcaption></figure>`).join('')));
+    }
+  }
+
+  if (B.words) {
+    const inRange = i => B.fy === 'all' || fyOf(i) === +B.fy;
+    const ws = S.items.filter(i => i.childId === c.id && i.type === 'word' && inRange(i)).sort((a, b) => a.date.localeCompare(b.date));
+    for (let k = 0; k < ws.length; k += 8) {
+      pages.push(pg('p-words', `${k === 0 ? '<h2>ことば集</h2>' : ''}` + ws.slice(k, k + 8).map(w => `<div class="w"><q>${esc(w.word.text)}</q><small>${esc(w.date)}　${esc(ageLabel(c.birth, w.date))}${w.word.mistake && w.word.correct ? '　→ 正しくは「' + esc(w.word.correct) + '」' : ''}</small></div>`).join('')));
+    }
+  }
+
+  // 製本しやすいよう、奥付を含めたページ数を4の倍数に（足りない分は書き込める「メモ」ページ）
+  while ((pages.length + 1) % 4) pages.push(pg('p-memo', '<div class="memo-lines"><p>ここに、思い出を書き込めます</p></div>'));
+  pages.push(pg('p-back', `<div><p>${esc(c.name)}の作品集</p><small>作品 ${items.length}点　${esc(today())} 作成</small><small>こども作品ギャラリー</small></div>`));
+
+  host.innerHTML = pages.join('');
+  hydrate(host);
+  $('#bPages').textContent = `全${pages.length}ページ`;
+}
+
+// ---------- グッズのイメージ（背景切り抜き） ----------
+const GOODS = {
+  tshirt: { label: '👕 Tシャツ', colors: ['#ffffff', '#f7d9d2', '#cfe6f5', '#dcefd0', '#fbe9b0', '#2d3a4f'] },
+  case: { label: '📱 スマホケース', colors: ['#ffffff', '#f7d9d2', '#cfe6f5', '#d9cdf0', '#2d3a4f'] },
+  tote: { label: '👜 トートバッグ', colors: ['#f3ead8', '#ffffff', '#e8c6c0', '#b9d3c2', '#2d3a4f'] },
+  key: { label: '🔑 アクリルキーホルダー', colors: [] },
+};
+const GS = { kind: 'tshirt', color: {}, thr: 60, photo: 0 };
+const cutCache = new Map();
+
+async function cutFor(photoId, thr) {
+  const k = photoId + ':' + thr;
+  if (cutCache.has(k)) return cutCache.get(k);
+  const r = await DB.get('blobs', photoId);
+  const out = Imaging.cutout(await Imaging.loadImage(r.blob), thr);
+  cutCache.clear();
+  cutCache.set(k, out);
+  return out;
+}
+
+async function goods(id) {
+  const i = S.items.find(x => x.id === id);
+  if (!i || !i.photos?.length) return go('#gallery');
+  if (GS.id !== id) Object.assign(GS, { id, photo: 0 });
+  const ph = i.photos[Math.min(GS.photo, i.photos.length - 1)];
+  const g = GOODS[GS.kind];
+  const col = GS.color[GS.kind] || g.colors[0];
+  view().innerHTML = `<h1 class="page-title">🎁 グッズのイメージ</h1>
+  <p class="hint">背景を切り抜いて、絵の部分だけをグッズにのせたイメージです（実際の注文はまだできません）。</p>
+  ${i.photos.length > 1 ? `<div class="photo-strip" id="gPhotos">${i.photos.map((p, k) => `<div class="ph-item ${k === GS.photo ? 'sel' : ''}" data-k="${k}"><img data-blob="${p.thumb}" alt=""></div>`).join('')}</div>` : ''}
+  <div class="seg wrap" id="gKinds">${Object.entries(GOODS).map(([k, v]) => `<button class="${GS.kind === k ? 'on' : ''}" data-k="${k}">${v.label}</button>`).join('')}</div>
+  <div class="goods-stage"><canvas id="gCanvas" width="800" height="800"></canvas><div class="busy" id="gBusy">切り抜き中…</div></div>
+  ${g.colors.length ? `<div class="swatches" id="gColors">${g.colors.map(cl => `<button type="button" class="${cl === col ? 'on' : ''}" data-c="${cl}" style="background:${cl}" aria-label="色"></button>`).join('')}</div>` : ''}
+  <div class="sliders"><label>✂️ 切り抜きの強さ <input type="range" id="gThr" min="25" max="140" value="${GS.thr}"><output id="oThr">${GS.thr}</output></label>
+    <p class="hint">背景が残るときは右へ、絵が欠けるときは左へ動かします。</p></div>
+  <div class="row"><button class="btn primary" id="gSave">🖼️ このイメージを保存</button><button class="btn" id="gPng">✂️ 切り抜き画像（透明PNG）を保存</button></div>
+  <a class="btn wide" href="#item/${i.id}">← 作品にもどる</a>`;
+  hydrate(view());
+
+  let token = 0;
+  const draw = async () => {
+    const my = ++token;
+    $('#gBusy').hidden = false;
+    await new Promise(r => setTimeout(r, 20));
+    const art = await cutFor(ph.full, GS.thr);
+    if (my !== token) return;
+    $('#gBusy').hidden = true;
+    if (!art) { toast('切り抜けませんでした。切り抜きの強さを下げてください', 4000); return; }
+    drawGoods($('#gCanvas'), art, GS.kind, GS.color[GS.kind] || GOODS[GS.kind].colors[0]);
+  };
+  $$('#gPhotos .ph-item').forEach(el => { el.onclick = () => { GS.photo = +el.dataset.k; goods(id); }; });
+  $$('#gKinds button').forEach(b => { b.onclick = () => { GS.kind = b.dataset.k; goods(id); }; });
+  $$('#gColors button').forEach(b => { b.onclick = () => { GS.color[GS.kind] = b.dataset.c; goods(id); }; });
+  const thr = $('#gThr');
+  let t;
+  thr.oninput = () => { $('#oThr').textContent = thr.value; clearTimeout(t); t = setTimeout(() => { GS.thr = +thr.value; draw(); }, 250); };
+  $('#gSave').onclick = () => $('#gCanvas').toBlob(b => download(b, `グッズイメージ_${GS.kind}_${today()}.png`), 'image/png');
+  $('#gPng').onclick = async () => {
+    const art = await cutFor(ph.full, GS.thr);
+    if (!art) return toast('切り抜けませんでした');
+    art.toBlob(b => download(b, `切り抜き_${safe(i.title) || 'さくひん'}_${today()}.png`), 'image/png');
+  };
+  draw();
+}
+
+function fitDraw(ctx, art, cx, cy, bw, bh) {
+  const s = Math.min(bw / art.width, bh / art.height);
+  const w = art.width * s, h = art.height * s;
+  ctx.drawImage(art, cx - w / 2, cy - h / 2, w, h);
+  return { x: cx - w / 2, y: cy - h / 2, w, h };
+}
+
+function drawGoods(cv, art, kind, color) {
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(2, 0, 0, 2, 0, 0); // 400x400 の座標で描く
+  ctx.clearRect(0, 0, 400, 400);
+  const bg = ctx.createLinearGradient(0, 0, 0, 400);
+  bg.addColorStop(0, '#fbf3e8'); bg.addColorStop(1, '#efe3d3');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, 400, 400);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.shadowColor = 'rgba(80,50,20,.22)';
+  const base = (draw) => { ctx.shadowBlur = 14; ctx.shadowOffsetY = 6; draw(); ctx.shadowBlur = 0; ctx.shadowOffsetY = 0; };
+
+  if (kind === 'tshirt') {
+    const p = new Path2D('M130 44 L58 74 L18 152 L74 178 L96 142 L96 362 L304 362 L304 142 L326 178 L382 152 L342 74 L270 44 Q200 90 130 44 Z');
+    base(() => { ctx.fillStyle = color; ctx.fill(p); });
+    ctx.strokeStyle = 'rgba(0,0,0,.2)'; ctx.lineWidth = 2; ctx.stroke(p);
+    ctx.beginPath(); ctx.moveTo(130, 44); ctx.quadraticCurveTo(200, 90, 270, 44); ctx.stroke();
+    fitDraw(ctx, art, 200, 215, 150, 170);
+  } else if (kind === 'case') {
+    const rr = new Path2D(); rr.roundRect(126, 26, 148, 348, 30);
+    base(() => { ctx.fillStyle = color; ctx.fill(rr); });
+    ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 3; ctx.stroke(rr);
+    fitDraw(ctx, art, 200, 240, 118, 210);
+    const cam = new Path2D(); cam.roundRect(138, 38, 58, 58, 14);
+    ctx.fillStyle = 'rgba(30,30,30,.88)'; ctx.fill(cam);
+    ctx.fillStyle = '#555';
+    for (const [x, y] of [[154, 54], [180, 54], [154, 80], [180, 80]]) { ctx.beginPath(); ctx.arc(x, y, 8, 0, 7); ctx.fill(); }
+  } else if (kind === 'tote') {
+    ctx.strokeStyle = color === '#ffffff' ? '#d9d2c4' : color; ctx.lineWidth = 12;
+    ctx.beginPath(); ctx.moveTo(150, 140); ctx.bezierCurveTo(150, 40, 250, 40, 250, 140); ctx.stroke();
+    ctx.strokeStyle = 'rgba(0,0,0,.15)'; ctx.lineWidth = 1.5; ctx.stroke();
+    base(() => { ctx.fillStyle = color; ctx.fillRect(86, 130, 228, 240); });
+    ctx.strokeStyle = 'rgba(0,0,0,.2)'; ctx.lineWidth = 2; ctx.strokeRect(86, 130, 228, 240);
+    fitDraw(ctx, art, 200, 252, 160, 180);
+  } else {
+    // アクリルキーホルダー：白いふちを付けた切り抜き
+    const s = Math.min(230 / art.width, 250 / art.height);
+    const w = Math.max(1, Math.round(art.width * s)), h = Math.max(1, Math.round(art.height * s));
+    const pad = 22;
+    const tmp = document.createElement('canvas');
+    tmp.width = w + pad * 2; tmp.height = h + pad * 2;
+    const t = tmp.getContext('2d');
+    const sil = document.createElement('canvas');
+    sil.width = w; sil.height = h;
+    const sx = sil.getContext('2d');
+    sx.drawImage(art, 0, 0, w, h);
+    sx.globalCompositeOperation = 'source-in';
+    sx.fillStyle = '#fff'; sx.fillRect(0, 0, w, h);
+    for (const R of [12, 8, 4]) for (let a = 0; a < 32; a++) t.drawImage(sil, pad + Math.cos(a / 32 * 6.2832) * R, pad + Math.sin(a / 32 * 6.2832) * R);
+    t.drawImage(art, pad, pad, w, h);
+    const x0 = 200 - tmp.width / 2, y0 = 214 - tmp.height / 2;
+    ctx.shadowBlur = 14; ctx.shadowOffsetY = 6;
+    ctx.drawImage(tmp, x0, y0);
+    ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+    // 輪っかは、切り抜きのいちばん上の点（その行の横の中心）に付ける
+    const td = t.getImageData(0, 0, tmp.width, tmp.height).data;
+    let topY = 0, topX = tmp.width / 2;
+    find: for (let y = 0; y < tmp.height; y++) {
+      let sum = 0, cnt = 0;
+      for (let x = 0; x < tmp.width; x++) if (td[(y * tmp.width + x) * 4 + 3] > 128) { sum += x; cnt++; }
+      if (cnt) { topY = y; topX = sum / cnt; break find; }
+    }
+    const rx = x0 + topX, ry = y0 + topY;
+    ctx.strokeStyle = '#9aa0a6'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(rx, ry - 4, 15, 0, 7); ctx.stroke();
+    ctx.strokeStyle = '#c9cdd1'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(rx, ry - 4, 10, 0, 7); ctx.stroke();
+  }
 }
 
 // ---------- ルーター ----------
-const routes = { home, gallery, item, add, edit, burst, ritual, words, boxes, box, labels, settings, book };
-const TAB_OF = { item: 'gallery', edit: 'gallery', burst: 'add', ritual: 'gallery', box: 'boxes', labels: 'boxes' };
+const routes = { home, gallery, item, add, edit, burst, ritual, words, boxes, box, labels, settings, book, goods };
+const TAB_OF = { item: 'gallery', edit: 'gallery', burst: 'add', ritual: 'gallery', box: 'boxes', labels: 'boxes', goods: 'gallery', book: 'gallery' };
 async function router() {
   stopCamera();
+  $('#pageStyle')?.remove(); // 作品集用の用紙サイズ指定は、作品集の画面だけで有効にする
   closeModal();
   const [name, ...args] = (location.hash.slice(1) || 'home').split('/');
   const fn = routes[name] || home;
