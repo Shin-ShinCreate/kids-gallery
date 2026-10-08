@@ -1,7 +1,7 @@
 // オフラインでも開けるようにするための Service Worker（ネット優先・つながらない時はキャッシュ）
-const CACHE = 'kids-gallery-v3';
+const CACHE = 'kids-gallery-v4';
 const ASSETS = [
-  './', 'index.html', 'style.css', 'db.js', 'imaging.js', 'app.js', 'manifest.json', 'icon.svg',
+  './', 'index.html', 'style.css', 'db.js', 'imaging.js', 'config.js', 'cloud.js', 'app.js', 'manifest.json', 'icon.svg',
   'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js',
 ];
@@ -15,6 +15,9 @@ self.addEventListener('activate', e => {
 });
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  // 家族共有のAPI（別のサーバー）の通信は、キャッシュせずそのまま通す（写真などの個人データを残さないため）
+  const u = new URL(e.request.url);
+  if (u.origin !== location.origin && u.origin !== 'https://cdnjs.cloudflare.com') return;
   e.respondWith(
     fetch(e.request, { cache: 'no-cache' })
       .then(res => {

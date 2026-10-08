@@ -310,3 +310,17 @@ input.mini { font-size: 13px; padding: 7px 10px; border-radius: 0; border: 0; bo
 
 #gKinds { border-radius: 18px; }
 #gKinds button { flex: 1 1 44%; }
+
+/* ---- 家族で共有 ---- */
+.top-r { display: flex; align-items: center; gap: 4px; }
+.cloud-badge { font-size: 20px; padding: 2px 6px; line-height: 1; }
+.cloud-badge[hidden] { display: none; }
+.cloud-badge.syncing { animation: spin 1.2s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.members { margin: 8px 0; }
+.member { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.usage { margin: 10px 0 14px; }
+.usage .bar { height: 8px; border-radius: 999px; background: #f0e2d2; overflow: hidden; }
+.usage .bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+.usage small { color: var(--sub); font-size: 12px; }
+.invite-code { font-size: 36px; font-weight: 700; letter-spacing: .12em; text-align: center; background: #fff; border: 2px dashed var(--accent); border-radius: 14px; padding: 14px 6px; margin: 6px 0 10px; color: var(--accent); }

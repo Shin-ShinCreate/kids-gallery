@@ -15,14 +15,16 @@
 <link rel="stylesheet" href="style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js" defer></script>
+<script src="config.js" defer></script>
 <script src="db.js" defer></script>
+<script src="cloud.js" defer></script>
 <script src="imaging.js" defer></script>
 <script src="app.js" defer></script>
 </head>
 <body>
 <header id="topbar">
   <a href="#home" class="logo">こども<span>作品</span>ギャラリー</a>
-  <a href="#settings" class="gear" aria-label="設定とバックアップ">⚙️</a>
+  <span class="top-r"><a href="#settings" id="cloudBadge" class="cloud-badge" hidden aria-label="家族共有の状態"></a><a href="#settings" class="gear" aria-label="設定とバックアップ">⚙️</a></span>
 </header>
 <main id="view"><p class="empty">読み込み中…</p></main>
 <nav id="tabbar">

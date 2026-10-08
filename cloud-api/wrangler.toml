@@ -1,0 +1,17 @@
+name = "kids-gallery-api"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+
+# 作品・ことばの記録（D1）。database_id は `wrangler d1 create` の結果で置き換える
+[[d1_databases]]
+binding = "DB"
+database_name = "kids-gallery"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+# 写真・声のファイル置き場（R2）
+[[r2_buckets]]
+binding = "BLOBS"
+bucket_name = "kids-gallery-blobs"
+
+[vars]
+ALLOWED_ORIGINS = "https://shin-shincreate.github.io,http://localhost:8765,http://127.0.0.1:8765"

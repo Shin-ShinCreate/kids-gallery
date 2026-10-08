@@ -949,6 +949,7 @@ async function settings() {
   const last = (await DB.get('meta', 'lastBackup'))?.value;
   const t = today();
   view().innerHTML = `<h1 class="page-title">⚙️ 設定とバックアップ</h1>
+  <section class="panel" id="cloudPanel"></section>
   <section class="panel"><h2>👧 こども</h2>
     ${S.children.map(c => `<div class="child-row"><span class="dot" style="background:${c.color}"></span><b>${esc(c.name)}</b><small>${esc(c.birth)}（いま ${ageLabel(c.birth, t)}・${gradeLabel(c.birth, t)}）</small><button class="btn small" data-edit="${c.id}">編集</button></div>`).join('')}
     <button class="btn wide" id="addChild">＋ こどもを追加</button></section>
@@ -960,7 +961,10 @@ async function settings() {
     <label class="btn wide">♻️ 書き出したZIPから復元<input type="file" accept=".zip,application/zip" id="imp" hidden></label>
     <p class="hint">ZIPの中身：こどもごと・年度ごとのフォルダに分けた写真／ことば一覧（テキスト）／声の録音／復元用データ。パソコンでもそのまま開いて見られます。</p></section>
   <section class="panel"><h2>この試作版について</h2>
-    <p class="hint">データはこの端末のブラウザの中だけに保存されます（サーバーには送られません）。ブラウザのデータを消すと思い出も消えるので、定期的に書き出してください。</p></section>`;
+    <p class="hint">${Cloud.enabled()
+      ? 'データは、この端末と、家族で共有しているクラウドの両方に保存されます。それでも、ときどき「まるごと書き出し」でバックアップしておくと安心です。'
+      : 'データはこの端末のブラウザの中だけに保存されます（サーバーには送られません）。ブラウザのデータを消すと思い出も消えるので、定期的に書き出してください。'}</p></section>`;
+  cloudPanel();
   $$('[data-edit]').forEach(b => {
     b.onclick = () => {
       const c = childById(b.dataset.edit);
@@ -1005,7 +1009,7 @@ async function exportZip() {
     const data = { app: 'kids-gallery', version: 1, exportedAt: new Date().toISOString(), children: S.children, boxes: S.boxes, items: [] };
     const used = new Set();
     const uniq = p => { let q = p, n = 2; while (used.has(q)) q = p.replace(/(\.\w+)$/, `_${n++}$1`); used.add(q); return q; };
-    const getB = async id => (await DB.get('blobs', id))?.blob;
+    const getB = async id => (await getBlobRec(id))?.blob;
     let n = 0;
     for (const i of S.items) {
       btn.textContent = `書き出し中… ${++n}/${S.items.length}`;
@@ -1242,7 +1246,8 @@ const cutCache = new Map();
 async function cutFor(photoId, thr) {
   const k = photoId + ':' + thr;
   if (cutCache.has(k)) return cutCache.get(k);
-  const r = await DB.get('blobs', photoId);
+  const r = await getBlobRec(photoId);
+  if (!r) return null;
   const out = Imaging.cutout(await Imaging.loadImage(r.blob), thr);
   cutCache.clear();
   cutCache.set(k, out);
@@ -1371,10 +1376,162 @@ function drawGoods(cv, art, kind, color) {
   }
 }
 
+// ---------- 家族で共有（クラウド同期） ----------
+const fmtMB = b => (b / 1048576 < 10 ? (b / 1048576).toFixed(1) : Math.round(b / 1048576)) + 'MB';
+const CLOUD_STATE = {
+  off: ['', ''], idle: ['☁️', '共有中'], syncing: ['🔄', '同期中'], ok: ['☁️', '同期ずみ'],
+  offline: ['📴', 'オフライン'], error: ['⚠️', '同期できません'],
+};
+function updateBadge() {
+  const b = $('#cloudBadge');
+  if (!b) return;
+  const on = Cloud.enabled();
+  b.hidden = !on;
+  if (!on) return;
+  const [ic, label] = CLOUD_STATE[Cloud.state.state] || CLOUD_STATE.idle;
+  b.textContent = ic;
+  b.title = `${label}${Cloud.state.msg && Cloud.state.state !== 'syncing' ? '：' + Cloud.state.msg : ''}`;
+  b.className = 'cloud-badge ' + Cloud.state.state;
+}
+
+async function cloudPanel() {
+  const el = $('#cloudPanel');
+  if (!el) return;
+  const head = '<h2>👨‍👩‍👧 家族で共有</h2>';
+  if (!Cloud.available()) {
+    el.innerHTML = head + '<p class="hint">家族で共有するためのサーバーは、まだ準備中です。</p>';
+    return;
+  }
+  const cfg = Cloud.get();
+  if (!cfg) {
+    el.innerHTML = head + `<p>家族みんなのスマホで、同じギャラリーを見たり、作品を追加したりできます。写真は<b>あなた専用のクラウド</b>に預けられ、招待した家族だけが見られます。</p>
+      <button class="btn primary wide" id="cCreate">🏠 家族のギャラリーをつくる</button>
+      <button class="btn wide" id="cJoin">🔑 招待コードで参加する</button>
+      <p class="hint">すでに家族の誰かがつくっている場合は「招待コードで参加」を選んでください。</p>`;
+    $('#cCreate').onclick = cloudCreateModal;
+    $('#cJoin').onclick = cloudJoinModal;
+    return;
+  }
+  el.innerHTML = head + `<p class="hint">読み込み中…</p>`;
+  let inf;
+  try { inf = await Cloud.info(); }
+  catch (e) {
+    if (e.revoked) return cloudPanel();
+    el.innerHTML = head + `<p><b>${esc(cfg.familyName)}</b>　<span class="hint">あなた：${esc(cfg.memberName)}</span></p><p class="banner">⚠️ ${esc(e.message)}</p>
+      <button class="btn wide" id="cSync">🔄 もう一度つなぐ</button><button class="btn danger wide small" id="cLeave">この端末の共有をやめる</button>`;
+    $('#cSync').onclick = () => { Cloud.syncNow(); setTimeout(cloudPanel, 1200); };
+    $('#cLeave').onclick = leaveCloud;
+    return;
+  }
+  const owner = inf.me.role === 'owner';
+  const pct = Math.min(100, Math.round(inf.usage.bytes / inf.usage.limit * 100));
+  const st = CLOUD_STATE[Cloud.state.state] || CLOUD_STATE.idle;
+  el.innerHTML = head + `
+    <p><b>${esc(inf.family.name)}</b>　<span class="hint">あなた：${esc(inf.me.name)}${owner ? '（つくった人）' : ''}</span></p>
+    <p class="hint" id="cState">${st[0]} ${st[1]}${Cloud.state.last ? '　最後の同期 ' + new Date(Cloud.state.last).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : ''}</p>
+    <div class="members">${inf.members.map(m => `<div class="member"><span>${m.role === 'owner' ? '👑' : '👤'} ${esc(m.name)}${m.id === inf.me.id ? '（あなた）' : ''}</span>${owner && m.id !== inf.me.id ? `<button class="btn small danger" data-rm="${m.id}" data-name="${esc(m.name)}">外す</button>` : ''}</div>`).join('')}</div>
+    <button class="btn primary wide" id="cInvite">✉️ 家族を招待する</button>
+    <button class="btn wide" id="cSync">🔄 いま同期する</button>
+    <div class="usage"><div class="bar"><i style="width:${Math.max(pct, inf.usage.bytes ? 1 : 0)}%"></i></div>
+      <small>クラウドの使用量 ${fmtMB(inf.usage.bytes)} / ${fmtMB(inf.usage.limit)}（写真${inf.usage.files}ファイル）</small></div>
+    <button class="btn danger small" id="cLeave">この端末の共有をやめる</button>`;
+  $('#cInvite').onclick = cloudInviteModal;
+  $('#cSync').onclick = () => { Cloud.syncNow(); toast('同期しています…'); setTimeout(cloudPanel, 2000); };
+  $('#cLeave').onclick = leaveCloud;
+  $$('[data-rm]').forEach(b => {
+    b.onclick = async () => {
+      if (!confirm(`「${b.dataset.name}」さんを家族から外しますか？\n（その人のスマホからは、新しい作品が見られなくなります）`)) return;
+      try { await Cloud.removeMember(b.dataset.rm); toast('外しました'); cloudPanel(); } catch (e) { toast(e.message, 4000); }
+    };
+  });
+}
+
+async function leaveCloud() {
+  if (!confirm('この端末の家族共有をやめますか？\n・この端末のデータは残ります\n・クラウドのデータも残り、ほかの家族は使い続けられます')) return;
+  await Cloud.disconnect();
+  toast('共有をやめました');
+  settings();
+}
+
+function cloudCreateModal() {
+  const m = openModal(`<h2>🏠 家族のギャラリーをつくる</h2>
+    <form id="cForm" class="form">
+      <label>家族の名前<input name="family" required maxlength="40" placeholder="例：やまだ家"></label>
+      <label>あなたの呼び名<input name="me" required maxlength="40" placeholder="例：ママ"></label>
+      <label>設定キー<input name="key" type="password" required autocomplete="off" placeholder="サーバーを設置した人が決めたキー"></label>
+      <p class="hint">このスマホにすでにある作品も、家族のギャラリーに加わります。</p>
+      <div class="row"><button class="btn primary">つくる</button><button type="button" class="btn" id="cX">やめる</button></div></form>`);
+  $('#cX', m).onclick = closeModal;
+  $('#cForm', m).onsubmit = async e => {
+    e.preventDefault();
+    const f = new FormData(e.target), btn = e.submitter;
+    btn.disabled = true;
+    try {
+      await Cloud.create(f.get('key').trim(), f.get('family').trim(), f.get('me').trim());
+      closeModal(); toast('家族のギャラリーをつくりました'); cloudPanel(); updateBadge();
+    } catch (err) { toast(err.message, 4000); btn.disabled = false; }
+  };
+}
+
+function cloudJoinModal() {
+  const m = openModal(`<h2>🔑 招待コードで参加</h2>
+    <form id="cForm" class="form">
+      <label>招待コード（8文字）<input name="code" required maxlength="9" autocapitalize="characters" autocomplete="off" placeholder="例：ABCD-EFGH" style="text-transform:uppercase;letter-spacing:.15em"></label>
+      <label>あなたの呼び名<input name="me" required maxlength="40" placeholder="例：パパ"></label>
+      <p class="hint">このスマホにすでにある作品も、家族のギャラリーに加わります。</p>
+      <div class="row"><button class="btn primary">参加する</button><button type="button" class="btn" id="cX">やめる</button></div></form>`);
+  $('#cX', m).onclick = closeModal;
+  $('#cForm', m).onsubmit = async e => {
+    e.preventDefault();
+    const f = new FormData(e.target), btn = e.submitter;
+    btn.disabled = true;
+    try {
+      await Cloud.join(f.get('code').trim(), f.get('me').trim());
+      closeModal(); toast('家族のギャラリーに参加しました'); cloudPanel(); updateBadge();
+    } catch (err) { toast(err.message, 4000); btn.disabled = false; }
+  };
+}
+
+async function cloudInviteModal() {
+  let r;
+  try { r = await Cloud.invite(); } catch (e) { return toast(e.message, 4000); }
+  const code = r.code.slice(0, 4) + '-' + r.code.slice(4);
+  const url = location.href.split('#')[0];
+  const text = `こども作品ギャラリーに招待します。\n\n① アプリを開く：${url}\n② ⚙️ →「家族で共有」→「招待コードで参加する」\n③ 招待コード：${code}\n\n（コードは3日間・1回だけ使えます）`;
+  const m = openModal(`<h2>✉️ 家族を招待</h2>
+    <p>招待コード</p><div class="invite-code">${code}</div>
+    <p class="hint">3日間、1人だけが使えます。別の家族を招待するときは、もう一度つくってください。</p>
+    <div class="row"><button class="btn primary" id="iShare">📤 LINEなどで送る</button><button class="btn" id="iCopy">📋 コピー</button><button class="btn" id="iX">閉じる</button></div>`);
+  $('#iX', m).onclick = closeModal;
+  $('#iCopy', m).onclick = async () => { try { await navigator.clipboard.writeText(text); toast('コピーしました'); } catch { toast('コピーできませんでした'); } };
+  $('#iShare', m).onclick = async () => {
+    if (navigator.share) { try { await navigator.share({ text }); } catch { } }
+    else { try { await navigator.clipboard.writeText(text); toast('共有に未対応のため、コピーしました'); } catch { } }
+  };
+}
+
+// 家族の更新が届いたときの画面の更新
+Cloud.hooks.refresh = async gone => {
+  await loadAll();
+  await gcBlobs(gone, S.items);
+  const modalOpen = $('#modal').classList.contains('open');
+  const [name, ...args] = (location.hash.slice(1) || 'home').split('/');
+  const readOnlyView = ['home', 'gallery', 'boxes', 'box', 'item', 'settings'].includes(name) || (name === 'words' && !args.length);
+  if (!modalOpen && readOnlyView) { await router({ keep: true }); toast('家族の更新が届きました'); }
+  else toast('家族の更新が届きました（画面を開きなおすと反映されます）', 4000);
+};
+Cloud.hooks.revoked = () => { toast('この端末は家族の共有から外されました（データは残っています）', 5000); updateBadge(); if (location.hash === '#settings') settings(); };
+Cloud.on(() => {
+  updateBadge();
+  const s = $('#cState');
+  if (s) { const st = CLOUD_STATE[Cloud.state.state] || CLOUD_STATE.idle; s.textContent = `${st[0]} ${st[1]}${Cloud.state.state === 'error' || Cloud.state.state === 'offline' ? '：' + Cloud.state.msg : ''}`; }
+});
+
 // ---------- ルーター ----------
 const routes = { home, gallery, item, add, edit, burst, ritual, words, boxes, box, labels, settings, book, goods };
 const TAB_OF = { item: 'gallery', edit: 'gallery', burst: 'add', ritual: 'gallery', box: 'boxes', labels: 'boxes', goods: 'gallery', book: 'gallery' };
-async function router() {
+async function router(opts) {
+  const keep = opts?.keep === true ? window.scrollY : 0;
   stopCamera();
   $('#pageStyle')?.remove(); // 作品集用の用紙サイズ指定は、作品集の画面だけで有効にする
   closeModal();
@@ -1382,11 +1539,12 @@ async function router() {
   const fn = routes[name] || home;
   const tab = TAB_OF[name] || name;
   $$('#tabbar a').forEach(a => a.classList.toggle('on', a.dataset.tab === tab));
-  window.scrollTo(0, 0);
+  window.scrollTo(0, keep);
   try { await fn(...args.map(decodeURIComponent)); }
   catch (err) { console.error(err); view().innerHTML = `<p class="empty">エラーが起きました：${esc(err.message)}</p>`; }
+  if (keep) window.scrollTo(0, keep);
 }
-window.addEventListener('hashchange', router);
+window.addEventListener('hashchange', () => router());
 
 (async function init() {
   await loadAll();
@@ -1395,4 +1553,5 @@ window.addEventListener('hashchange', router);
     navigator.serviceWorker.register('sw.js').catch(() => { });
   }
   router();
+  Cloud.init().then(updateBadge).catch(e => console.error(e));
 })();
