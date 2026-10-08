@@ -6,7 +6,7 @@ compatibility_date = "2025-06-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "kids-gallery"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "66e974fa-f096-433b-a2f3-a2859c3895de"
 
 # 写真・声のファイル置き場（R2）
 [[r2_buckets]]
