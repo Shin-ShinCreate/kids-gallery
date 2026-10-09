@@ -1,9 +1,12 @@
-// こども作品ギャラリー 家族共有API（Cloudflare Workers + D1 + R2）
+// キッズギャラリー 家族共有API（Cloudflare Workers + D1 + R2）
 // 無料枠に収めるため、1回のリクエストで使う D1 の問い合わせ数を少なく保っている。
 
 const MAX_BLOB = 12 * 1024 * 1024;          // 1ファイルの上限（12MB）
 const QUOTA = 9 * 1024 * 1024 * 1024;       // R2無料枠（10GB）を超えないための上限（9GB）
 const INVITE_TTL = 3 * 24 * 3600 * 1000;    // 招待コードの有効期間（3日）
+const DEVICE_INVITE_TTL = 30 * 60 * 1000;   // 「端末を追加」コードの有効期間（30分）
+const MAX_DEVICES = 10;                     // 1人がつなげられる端末の数
+const SEEN_EVERY = 3600 * 1000;             // 「最後に使った時刻」の更新は1時間に1回まで（書き込みを減らす）
 const KINDS = new Set(['children', 'items', 'boxes']);
 const BLOB_TYPES = /^(image\/(jpeg|png|webp)|audio\/[\w.+-]+)(;.*)?$/;
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -68,13 +71,36 @@ async function readJson(req, limit = 2 * 1024 * 1024) {
   try { return JSON.parse(text); } catch { return fail(400, '形式が正しくありません'); }
 }
 
+const cleanName = (s, fallback) => String(s || '').trim().slice(0, 40) || fallback;
+
+// 端末の登録。メンバー側の token_hash は「端末へ移した」印にして、端末の表だけで本人確認する
+const deviceStmt = (env, id, memberId, name, token_hash, now) => env.DB.prepare(
+  'INSERT OR IGNORE INTO devices (id, member_id, name, token_hash, created, last_seen) VALUES (?, ?, ?, ?, ?, ?)'
+).bind(id, memberId, name, token_hash, now, now);
+
 async function auth(req, env) {
   const m = /^Bearer ([0-9a-f]{64})$/.exec(req.headers.get('Authorization') || '');
   if (!m) fail(401, 'ログインが必要です');
+  const h = await sha256(m[1]);
+  // 端末の表に合言葉があればその端末。なければ、端末機能ができる前の古い合言葉（メンバーに直接ついているもの）
   const row = await env.DB.prepare(
-    'SELECT m.id, m.name, m.role, m.family_id, f.name AS family_name FROM members m JOIN families f ON f.id = m.family_id WHERE m.token_hash = ? AND m.revoked = 0'
-  ).bind(await sha256(m[1])).first();
+    `SELECT m.id, m.name, m.role, m.family_id, f.name AS family_name, d.id AS device_id, d.last_seen
+     FROM members m JOIN families f ON f.id = m.family_id
+     LEFT JOIN devices d ON d.member_id = m.id AND d.token_hash = ? AND d.revoked = 0
+     WHERE m.revoked = 0 AND (d.id IS NOT NULL OR m.token_hash = ?)`
+  ).bind(h, h).first();
   if (!row) fail(401, 'この端末は家族から外されています');
+  const now = Date.now();
+  if (!row.device_id) {
+    // 古い合言葉を、はじめて使ったとき：端末の表に引っ越す（以後は端末として扱う）
+    await env.DB.batch([
+      deviceStmt(env, crypto.randomUUID(), row.id, 'はじめの端末', h, now),
+      env.DB.prepare("UPDATE members SET token_hash = 'moved:' || id WHERE id = ? AND token_hash = ?").bind(row.id, h),
+    ]);
+    row.device_id = (await env.DB.prepare('SELECT id FROM devices WHERE token_hash = ?').bind(h).first())?.id;
+  } else if (now - row.last_seen > SEEN_EVERY) {
+    await env.DB.prepare('UPDATE devices SET last_seen = ? WHERE id = ?').bind(now, row.device_id).run();
+  }
   return row;
 }
 
@@ -85,15 +111,19 @@ async function route(req, env, url) {
 
   if (p === '/api/family' && method === 'POST') return createFamily(req, env);
   if (p === '/api/join' && method === 'POST') return joinFamily(req, env);
+  if (p === '/api/device-join' && method === 'POST') return joinDevice(req, env);
 
   const me = await auth(req, env);
   if (p === '/api/family' && method === 'GET') return familyInfo(env, me);
   if (p === '/api/invite' && method === 'POST') return createInvite(env, me);
+  if (p === '/api/device-invite' && method === 'POST') return createDeviceInvite(env, me);
   if (p === '/api/sync' && method === 'GET') return pullDocs(env, me, url);
   if (p === '/api/sync' && method === 'POST') return pushDocs(req, env, me);
 
   let m = /^\/api\/members\/([\w-]+)$/.exec(p);
   if (m && method === 'DELETE') return removeMember(env, me, m[1]);
+  m = /^\/api\/devices\/([\w-]+)$/.exec(p);
+  if (m && method === 'DELETE') return removeDevice(env, me, m[1]);
   m = /^\/api\/blob\/([\w-]+)$/.exec(p);
   if (m) {
     if (!ID_RE.test(m[1])) fail(400, 'idが正しくありません');
@@ -113,7 +143,8 @@ async function createFamily(req, env) {
   const fid = crypto.randomUUID(), mid = crypto.randomUUID(), token = randomToken(), now = Date.now();
   await env.DB.batch([
     env.DB.prepare('INSERT INTO families (id, name, created) VALUES (?, ?, ?)').bind(fid, familyName, now),
-    env.DB.prepare('INSERT INTO members (id, family_id, name, role, token_hash, created) VALUES (?, ?, ?, ?, ?, ?)').bind(mid, fid, memberName, 'owner', await sha256(token), now),
+    env.DB.prepare('INSERT INTO members (id, family_id, name, role, token_hash, created) VALUES (?, ?, ?, ?, ?, ?)').bind(mid, fid, memberName, 'owner', 'moved:' + mid, now),
+    deviceStmt(env, crypto.randomUUID(), mid, cleanName(b.deviceName, 'はじめの端末'), await sha256(token), now),
     env.DB.prepare('INSERT INTO revs (family_id, rev) VALUES (?, 0)').bind(fid),
   ]);
   return json({ token, family: { id: fid, name: familyName }, me: { id: mid, name: memberName, role: 'owner' } });
@@ -130,21 +161,45 @@ async function joinFamily(req, env) {
     'UPDATE invites SET used_by = ? WHERE code = ? AND used_by IS NULL AND expires > ? RETURNING family_id'
   ).bind(mid, code, now).first();
   if (!used) fail(403, '招待コードが違うか、期限切れ・使用済みです');
-  await env.DB.prepare('INSERT INTO members (id, family_id, name, role, token_hash, created) VALUES (?, ?, ?, ?, ?, ?)')
-    .bind(mid, used.family_id, memberName, 'member', await sha256(token), now).run();
+  await env.DB.batch([
+    env.DB.prepare('INSERT INTO members (id, family_id, name, role, token_hash, created) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(mid, used.family_id, memberName, 'member', 'moved:' + mid, now),
+    deviceStmt(env, crypto.randomUUID(), mid, cleanName(b.deviceName, 'はじめの端末'), await sha256(token), now),
+  ]);
   const fam = await env.DB.prepare('SELECT id, name FROM families WHERE id = ?').bind(used.family_id).first();
   return json({ token, family: fam, me: { id: mid, name: memberName, role: 'member' } });
 }
 
+// 同じ人の、別の端末をつなぐ（新しいメンバーはつくらない）
+async function joinDevice(req, env) {
+  const b = await readJson(req);
+  const code = String(b.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (code.length !== 8) fail(400, '端末追加コード（8文字）を入れてください');
+  const did = crypto.randomUUID(), token = randomToken(), now = Date.now();
+  // コードは1回きり。使えた端末だけがつながる
+  const used = await env.DB.prepare(
+    'UPDATE device_invites SET used_by = ? WHERE code = ? AND used_by IS NULL AND expires > ? RETURNING member_id'
+  ).bind(did, code, now).first();
+  if (!used) fail(403, 'コードが違うか、期限切れ・使用済みです');
+  const who = await env.DB.prepare(
+    'SELECT m.id, m.name, m.role, f.id AS fid, f.name AS fname FROM members m JOIN families f ON f.id = m.family_id WHERE m.id = ? AND m.revoked = 0'
+  ).bind(used.member_id).first();
+  if (!who) fail(403, 'このメンバーは家族から外されています');
+  await deviceStmt(env, did, who.id, cleanName(b.deviceName, '新しい端末'), await sha256(token), now).run();
+  return json({ token, family: { id: who.fid, name: who.fname }, me: { id: who.id, name: who.name, role: who.role }, device: { id: did } });
+}
+
 async function familyInfo(env, me) {
-  const [members, usage] = await env.DB.batch([
+  const [members, usage, devices] = await env.DB.batch([
     env.DB.prepare('SELECT id, name, role, created FROM members WHERE family_id = ? AND revoked = 0 ORDER BY created').bind(me.family_id),
     env.DB.prepare('SELECT COALESCE(SUM(size), 0) AS bytes, COUNT(*) AS files FROM blobs WHERE family_id = ?').bind(me.family_id),
+    env.DB.prepare('SELECT id, name, created, last_seen FROM devices WHERE member_id = ? AND revoked = 0 ORDER BY created').bind(me.id),
   ]);
   return json({
     family: { id: me.family_id, name: me.family_name },
-    me: { id: me.id, name: me.name, role: me.role },
+    me: { id: me.id, name: me.name, role: me.role, deviceId: me.device_id },
     members: members.results,
+    devices: devices.results,
     usage: { bytes: usage.results[0].bytes, files: usage.results[0].files, limit: QUOTA },
   });
 }
@@ -154,6 +209,26 @@ async function createInvite(env, me) {
   await env.DB.prepare('INSERT INTO invites (code, family_id, created, expires) VALUES (?, ?, ?, ?)')
     .bind(code, me.family_id, now, now + INVITE_TTL).run();
   return json({ code, expires: now + INVITE_TTL });
+}
+
+// 「端末を追加」コード：すでにつながっている端末から出す。受け取った端末は、同じ人としてつながる
+async function createDeviceInvite(env, me) {
+  const n = (await env.DB.prepare('SELECT COUNT(*) AS n FROM devices WHERE member_id = ? AND revoked = 0').bind(me.id).first()).n;
+  if (n >= MAX_DEVICES) fail(400, `つなげられる端末は${MAX_DEVICES}台までです。使わない端末を外してください`);
+  const code = randomCode(), now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM device_invites WHERE expires < ?').bind(now - 24 * 3600 * 1000),
+    env.DB.prepare('INSERT INTO device_invites (code, member_id, family_id, created, expires) VALUES (?, ?, ?, ?, ?)')
+      .bind(code, me.id, me.family_id, now, now + DEVICE_INVITE_TTL),
+  ]);
+  return json({ code, expires: now + DEVICE_INVITE_TTL });
+}
+
+// 自分の端末を外す（なくした端末など）。この端末自身を外すこともできる（「共有をやめる」のとき）
+async function removeDevice(env, me, id) {
+  const r = await env.DB.prepare('UPDATE devices SET revoked = 1 WHERE id = ? AND member_id = ? AND revoked = 0').bind(id, me.id).run();
+  if (!r.meta.changes) fail(404, '端末が見つかりません');
+  return json({ ok: true });
 }
 
 async function removeMember(env, me, id) {

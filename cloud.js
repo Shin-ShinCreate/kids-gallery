@@ -74,11 +74,15 @@ const Cloud = (() => {
     schedule(0);
   }
 
-  async function create(setupKey, familyName, memberName) {
-    await connect(await json('/api/family', { method: 'POST', auth: false, body: { setupKey, familyName, memberName } }));
+  async function create(setupKey, familyName, memberName, deviceName) {
+    await connect(await json('/api/family', { method: 'POST', auth: false, body: { setupKey, familyName, memberName, deviceName } }));
   }
-  async function join(code, memberName) {
-    await connect(await json('/api/join', { method: 'POST', auth: false, body: { code, memberName } }));
+  async function join(code, memberName, deviceName) {
+    await connect(await json('/api/join', { method: 'POST', auth: false, body: { code, memberName, deviceName } }));
+  }
+  // 同じ人の別の端末として、つなぐ（新しいメンバーはつくらない）
+  async function joinDevice(code, deviceName) {
+    await connect(await json('/api/device-join', { method: 'POST', auth: false, body: { code, deviceName } }));
   }
   async function disconnect(revoked = false) {
     cfg = null;
@@ -91,7 +95,14 @@ const Cloud = (() => {
 
   const info = () => json('/api/family');
   const invite = () => json('/api/invite', { method: 'POST' });
+  const deviceInvite = () => json('/api/device-invite', { method: 'POST' });
   const removeMember = id => request('/api/members/' + id, { method: 'DELETE' });
+  const removeDevice = id => request('/api/devices/' + id, { method: 'DELETE' });
+  // この端末の共有をやめる：サーバーの端末一覧からも外す（つながらないときは、この端末だけ外す）
+  async function leave() {
+    try { await removeDevice((await info()).me.deviceId); } catch { }
+    await disconnect();
+  }
 
   // ---------- 写真・声 ----------
   const inflight = new Map();
@@ -224,7 +235,7 @@ const Cloud = (() => {
   const pending = async () => (await DB.all('outbox')).length;
 
   return {
-    available, enabled, init, create, join, disconnect, info, invite, removeMember,
+    available, enabled, init, create, join, joinDevice, disconnect, leave, info, invite, deviceInvite, removeMember, removeDevice,
     fetchBlob, syncNow, get, pending, state: st,
     on: f => { listeners.add(f); return () => listeners.delete(f); },
     hooks,

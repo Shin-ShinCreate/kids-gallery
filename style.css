@@ -324,3 +324,11 @@ input.mini { font-size: 13px; padding: 7px 10px; border-radius: 0; border: 0; bo
 .usage .bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
 .usage small { color: var(--sub); font-size: 12px; }
 .invite-code { font-size: 36px; font-weight: 700; letter-spacing: .12em; text-align: center; background: #fff; border: 2px dashed var(--accent); border-radius: 14px; padding: 14px 6px; margin: 6px 0 10px; color: var(--accent); }
+
+/* ホーム画面に追加の案内・端末追加 */
+.banner.install { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; background: #eaf6ee; border-color: #b7dcc2; }
+.banner.install[hidden] { display: none; }
+.steps { padding-left: 22px; margin: 8px 0 14px; line-height: 1.7; }
+.steps li { margin: 8px 0; }
+.qr-box { width: 200px; max-width: 70%; margin: 4px auto 10px; background: #fff; padding: 10px; border-radius: 12px; border: 1px solid var(--line); }
+.qr-box svg { display: block; width: 100%; height: auto; }

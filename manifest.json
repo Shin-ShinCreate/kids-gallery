@@ -1,6 +1,6 @@
 {
-  "name": "こども作品ギャラリー",
-  "short_name": "作品ギャラリー",
+  "name": "キッズギャラリー",
+  "short_name": "キッズギャラリー",
   "description": "捨てられない子どもの作品・ことば・プレゼントを写真でしまっておくアプリ",
   "start_url": "./",
   "scope": "./",
@@ -9,6 +9,9 @@
   "theme_color": "#f4845f",
   "lang": "ja",
   "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
     { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ]
 }

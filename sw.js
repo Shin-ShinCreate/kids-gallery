@@ -1,7 +1,8 @@
 // オフラインでも開けるようにするための Service Worker（ネット優先・つながらない時はキャッシュ）
-const CACHE = 'kids-gallery-v6';
+const CACHE = 'kids-gallery-v7';
 const ASSETS = [
   './', 'index.html', 'style.css', 'db.js', 'imaging.js', 'config.js', 'cloud.js', 'app.js', 'manifest.json', 'icon.svg',
+  'icon-180.png', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png',
   'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js',
 ];

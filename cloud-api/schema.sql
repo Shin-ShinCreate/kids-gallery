@@ -1,4 +1,4 @@
--- こども作品ギャラリー 家族共有用データベース（Cloudflare D1）
+-- キッズギャラリー 家族共有用データベース（Cloudflare D1）
 CREATE TABLE IF NOT EXISTS families (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -18,6 +18,29 @@ CREATE INDEX IF NOT EXISTS members_family ON members (family_id);
 
 CREATE TABLE IF NOT EXISTS invites (
   code TEXT PRIMARY KEY,
+  family_id TEXT NOT NULL,
+  created INTEGER NOT NULL,
+  expires INTEGER NOT NULL,
+  used_by TEXT
+);
+
+-- 端末。合言葉（トークン）は、メンバーではなく端末ごとに持つ。
+-- 同じ人（メンバー）が、スマホ・タブレット・PCなど複数の端末をつなげられる。
+CREATE TABLE IF NOT EXISTS devices (
+  id TEXT PRIMARY KEY,
+  member_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  created INTEGER NOT NULL,
+  last_seen INTEGER NOT NULL,
+  revoked INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS devices_member ON devices (member_id);
+
+-- 「端末を追加」用のコード（同じ人の別の端末をつなぐ。30分・1回きり）
+CREATE TABLE IF NOT EXISTS device_invites (
+  code TEXT PRIMARY KEY,
+  member_id TEXT NOT NULL,
   family_id TEXT NOT NULL,
   created INTEGER NOT NULL,
   expires INTEGER NOT NULL,

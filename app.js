@@ -1,10 +1,10 @@
 'use strict';
-/* こども作品ギャラリー
+/* キッズギャラリー
    実装アイデア：①ありがとう儀式 ②現物の保管管理＋QRラベル ⑤連続撮影 ⑥自動補正
                 ⑧年齢・学年の自動付与 ⑨名言帳／言い間違い辞典 ⑩プレゼントカード ⑳まるごと書き出し */
 
 // アプリのバージョン（「このアプリについて」に表示。機能を変えたら更新する）
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 const APP_VERSION_DATE = '2026-10-09';
 
 // ---------- 小さな道具 ----------
@@ -131,6 +131,80 @@ function card(i) {
   return `<a class="card" href="#item/${i.id}"><div class="thumb">${ph ? `<img data-blob="${ph.thumb}" alt="">` : `<span class="ph">${TYPES[i.type].icon}</span>`}${i.status === 'released' ? '<span class="badge-rel" title="現物は手放しました">🕊️</span>' : ''}</div><div class="cap"><b>${esc(i.title || TYPES[i.type].label)}</b><span>${esc(c?.name || '')}・${esc(ageLabel(c?.birth, i.date))}</span></div></a>`;
 }
 
+// ---------- ホーム画面に追加 ----------
+const UA = navigator.userAgent;
+const isIOS = /iPhone|iPad|iPod/.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isAndroid = /Android/.test(UA);
+const inAppBrowser = /Line\/|FBAN|FBAV|Instagram|MicroMessenger|; wv\)/.test(UA); // LINEなどアプリ内のブラウザ（ここからは追加できない）
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+let installEvt = null; // Chrome・Edgeが出す「インストールできます」の合図（あれば、ボタン1つで追加できる）
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; });
+window.addEventListener('appinstalled', () => { installEvt = null; toast('ホーム画面に追加しました'); const c = $('#installCard'); if (c) c.hidden = true; });
+
+const INSTALL_HIDE_KEY = 'kg.installHidden';
+function installHidden() {
+  try { return Date.now() - Number(localStorage.getItem(INSTALL_HIDE_KEY) || 0) < 30 * 864e5; } catch { return false; }
+}
+// ホームの上に出す「ホーム画面に追加」の案内（アイコンから開いているときは出さない）
+function installCard() {
+  if (isStandalone() || installHidden()) return '';
+  return `<div class="banner install" id="installCard"><span>📲 ホーム画面に追加すると、アプリのようにすぐ開けます</span>
+    <span class="row"><button class="btn small primary" id="instBtn">追加のしかた</button><button class="btn small" id="instLater">あとで</button></span></div>`;
+}
+function bindInstall() {
+  const b = $('#instBtn');
+  if (b) b.onclick = installGuide;
+  const l = $('#instLater');
+  if (l) l.onclick = () => { try { localStorage.setItem(INSTALL_HIDE_KEY, String(Date.now())); } catch { } $('#installCard').hidden = true; };
+  const s = $('#instSettings');
+  if (s) s.onclick = installGuide;
+}
+async function installGuide() {
+  // Chrome・Edge（Android・パソコン）：ボタン1つで追加できる
+  if (installEvt) {
+    const ev = installEvt;
+    installEvt = null;
+    try { ev.prompt(); await ev.userChoice; } catch { }
+    return;
+  }
+  const url = location.href.split('#')[0];
+  let steps, note = '';
+  if (inAppBrowser) {
+    steps = ['右上（または右下）の「…」や共有マークをタップ', '「ブラウザで開く」（SafariやChrome）を選ぶ',
+      isIOS ? '開いたSafariで、もう一度ここ（「ホーム画面に追加」のしかた）を見る' : '開いたChromeで、もう一度ここ（「ホーム画面に追加」のしかた）を見る'];
+    note = 'LINEなどのアプリの中で開いているため、このままでは追加できません。';
+  } else if (isIOS) {
+    const safari = !/CriOS|EdgiOS|FxiOS|OPiOS/.test(UA);
+    steps = [`画面の${/iPad/.test(UA) ? '上' : '下'}にある<b>共有ボタン</b>（□に↑のマーク）をタップ`, '<b>「ホーム画面に追加」</b>をタップ（見つからないときは、メニューを下へスクロール）', '右上の<b>「追加」</b>をタップ'];
+    note = (safari ? '' : 'うまくいかないときは、Safariで開き直してください。')
+      + 'iPhone・iPadでは、Safariで入れたデータと、ホーム画面のアイコンのデータは<b>別々</b>です。追加したら、アイコンから開いて、そちらで「家族で共有」につないでください（Safari側の作品は、家族共有でそろいます）。';
+  } else if (isAndroid) {
+    steps = ['Chromeの右上の<b>「︙」</b>をタップ', '<b>「ホーム画面に追加」</b>（または「アプリをインストール」）をタップ', '<b>「追加」</b>をタップ'];
+  } else {
+    steps = ['ChromeやEdgeの、アドレスバーの右はしにある<b>インストールのアイコン（⊕）</b>をクリック', 'うまく出ないときは「︙」→「アプリ」→<b>「このサイトをアプリとしてインストール」</b>', '「インストール」をクリック'];
+    note = 'デスクトップにショートカットだけ置くときは、Chromeの「︙」→「保存と共有」→「ショートカットを作成」。';
+  }
+  const m = openModal(`<h2>📲 ホーム画面に追加</h2>
+    ${note ? `<p class="banner">${note}</p>` : ''}
+    <ol class="steps">${steps.map(s => `<li>${s}</li>`).join('')}</ol>
+    <div class="row">${inAppBrowser ? '<button class="btn primary" id="gCopy">📋 このアプリのリンクをコピー</button>' : ''}<button class="btn" id="gX">閉じる</button></div>`);
+  $('#gX', m).onclick = closeModal;
+  const c = $('#gCopy', m);
+  if (c) c.onclick = async () => { try { await navigator.clipboard.writeText(url); toast('コピーしました'); } catch { toast('コピーできませんでした'); } };
+}
+function installPanel() {
+  return `<section class="panel"><h2>📲 ホーム画面に追加</h2>${isStandalone()
+    ? '<p class="hint">✅ いま、ホーム画面のアイコンから開いています。</p>'
+    : '<p class="hint">アイコンをホーム画面に置くと、アプリのようにすぐ開けます。</p><button class="btn wide" id="instSettings">📲 追加のしかたを見る</button>'}</section>`;
+}
+const qrSvgTag = text => {
+  if (typeof qrcode === 'undefined') return '<p class="hint">QR部品を読み込めませんでした</p>';
+  const q = qrcode(0, 'M');
+  q.addData(text);
+  q.make();
+  return q.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+};
+
 // ---------- ホーム ----------
 async function home() {
   if (!S.children.length) return onboarding();
@@ -154,6 +228,7 @@ async function home() {
   }).filter(x => x.fresh >= 12 && (S.filterChild === 'all' || S.filterChild === x.c.id))[0];
 
   view().innerHTML = `
+  ${installCard()}
   ${childChips()}
   ${bookFor ? `<a class="banner book" href="#book/${bookFor.c.id}">📕 ${esc(bookFor.c.name)}の作品が${bookFor.n}点になりました。作品集（ART BOOK）を自動で作ってみませんか？ →</a>` : ''}
   ${needBackup ? `<a class="banner" href="#settings">💾 ${last ? '前回のバックアップから30日以上たちました' : 'まだ一度も書き出していません'}。思い出を守るために書き出しましょう →</a>` : ''}
@@ -177,15 +252,21 @@ async function home() {
   </section>
   <section><h2>さいきん しまったもの</h2>${recent.length ? `<div class="grid">${recent.map(card).join('')}</div>` : '<p class="empty">まだありません。まずは1枚撮ってみましょう！</p>'}</section>`;
   bindChildChips(home);
+  bindInstall();
   hydrate(view());
 }
 
 function onboarding() {
   view().innerHTML = `
-  <section class="hero"><div class="hero-ic">🖼️</div><h1>こども作品ギャラリー</h1>
+  <section class="hero"><div class="hero-ic">🖼️</div><h1>キッズギャラリー</h1>
   <p>絵・工作・習字・プレゼント・ことば…<br>捨てられない思い出を、写真でしまっておく場所です。</p></section>
+  ${installCard()}
+  ${Cloud.available() && !Cloud.enabled() ? `<section class="panel"><h2>👨‍👩‍👧 すでに家族で使っていますか？</h2>
+    <p class="hint">ほかの端末や、家族がもう使っているときは、お子さんを登録しなくても、つなぐだけで作品が届きます。</p>
+    <a class="btn wide" href="#settings">家族の共有につなぐ</a></section>` : ''}
   <section class="panel"><h2>まずはお子さんを登録</h2>${childFormHTML()}</section>`;
   bindChildForm(null, () => go('#home'));
+  bindInstall();
 }
 function childFormHTML(c = {}) {
   return `<form id="childForm" class="form">
@@ -943,7 +1024,7 @@ function labels() {
     <p class="hint">印刷して箱に貼ってください。スマホでQRを読むと、その箱の中身一覧が開きます。</p>
     ${local ? '<p class="banner">⚠️ いまはパソコンの中（localhost）で開いているため、スマホでQRを読んでも開けません。アプリをネット上に公開してから印刷するのがおすすめです。</p>' : ''}
     <div class="row"><button class="btn primary" id="doPrint">🖨️ 印刷する</button><a class="btn" href="#boxes">戻る</a></div></div>
-  <div class="labels">${S.boxes.map(b => `<div class="label"><div class="qr">${qrSvg(base + '#box/' + b.id)}</div><div><div class="l-name">${esc(b.name)}</div><div class="l-loc">${esc(b.location || '')}</div><div class="l-app">こども作品ギャラリー｜読み取ると中身が見られます</div></div></div>`).join('') || '<p class="empty">箱がありません</p>'}</div>`;
+  <div class="labels">${S.boxes.map(b => `<div class="label"><div class="qr">${qrSvg(base + '#box/' + b.id)}</div><div><div class="l-name">${esc(b.name)}</div><div class="l-loc">${esc(b.location || '')}</div><div class="l-app">キッズギャラリー｜読み取ると中身が見られます</div></div></div>`).join('') || '<p class="empty">箱がありません</p>'}</div>`;
   $('#doPrint').onclick = () => print();
 }
 
@@ -954,6 +1035,7 @@ async function settings() {
   const t = today();
   view().innerHTML = `<h1 class="page-title">⚙️ 設定とバックアップ</h1>
   <section class="panel" id="cloudPanel"></section>
+  ${installPanel()}
   <section class="panel"><h2>👧 こども</h2>
     ${S.children.map(c => `<div class="child-row"><span class="dot" style="background:${c.color}"></span><b>${esc(c.name)}</b><small>${esc(c.birth)}（いま ${ageLabel(c.birth, t)}・${gradeLabel(c.birth, t)}）</small><button class="btn small" data-edit="${c.id}">編集</button></div>`).join('')}
     <button class="btn wide" id="addChild">＋ こどもを追加</button></section>
@@ -965,7 +1047,7 @@ async function settings() {
     <label class="btn wide">♻️ 書き出したZIPから復元<input type="file" accept=".zip,application/zip" id="imp" hidden></label>
     <p class="hint">ZIPの中身：こどもごと・年度ごとのフォルダに分けた写真／ことば一覧（テキスト）／声の録音／復元用データ。パソコンでもそのまま開いて見られます。</p></section>
   <section class="panel"><h2>ℹ️ このアプリについて</h2>
-    <p><b>こども作品ギャラリー</b>　<small>バージョン ${APP_VERSION}（${APP_VERSION_DATE}）</small></p>
+    <p><b>キッズギャラリー</b>　<small>バージョン ${APP_VERSION}（${APP_VERSION_DATE}）</small></p>
     <p class="hint">${Cloud.enabled()
       ? 'データは、この端末と、家族で共有しているクラウドの両方に保存されます。それでも、ときどき「まるごと書き出し」でバックアップしておくと安心です。'
       : 'データはこの端末のブラウザの中だけに保存されます（サーバーには送られません）。ブラウザのデータを消すと思い出も消えるので、定期的に書き出してください。'}</p>
@@ -982,6 +1064,7 @@ async function settings() {
       <li><b>Android・パソコン：</b>どちらから開いても同じデータです。</li>
       <li><b>iPhone・iPad：</b>Safariで開いたときと、ホーム画面のアイコンから開いたときで、データは<b>別々</b>です。ふだんはどちらか一方だけで使ってください。</li>
       <li>両方で見たいときは、どちらでも「家族共有」をつなぐと、同じ内容にそろいます。</li>
+      <li>同じ人の端末は、「家族で共有」の<b>「端末を追加」</b>のコードやQRで、招待をもらいなおさずに追加できます。</li>
     </ul>
     <h3>家族共有のしくみ</h3>
     <ul class="hint">
@@ -991,6 +1074,7 @@ async function settings() {
       <li>写真と声は、必要なときにクラウドから取り寄せます。</li>
     </ul></section>`;
   cloudPanel();
+  bindInstall();
   $$('[data-edit]').forEach(b => {
     b.onclick = () => {
       const c = childById(b.dataset.edit);
@@ -1014,7 +1098,7 @@ async function settings() {
 const safe = s => String(s || '').replace(/[\\/:*?"<>|\r\n\t]/g, '_').trim().slice(0, 40);
 const audioExt = b => (/mp4|m4a|aac/.test(b.type) ? 'm4a' : /ogg/.test(b.type) ? 'ogg' : 'webm');
 const audioType = p => (p.endsWith('.m4a') ? 'audio/mp4' : p.endsWith('.ogg') ? 'audio/ogg' : 'audio/webm');
-const README = `こども作品ギャラリー 書き出しデータ
+const README = `キッズギャラリー 書き出しデータ
 
 ・こどもの名前のフォルダ → 年度のフォルダの中に、作品の写真が入っています。
   ファイル名は「日付_種類_題名_番号.jpg」です。
@@ -1031,7 +1115,7 @@ async function exportZip() {
   btn.disabled = true;
   try {
     const zip = new JSZip();
-    const top = 'こども作品ギャラリー';
+    const top = 'キッズギャラリー';
     const data = { app: 'kids-gallery', version: 1, exportedAt: new Date().toISOString(), children: S.children, boxes: S.boxes, items: [] };
     const used = new Set();
     const uniq = p => { let q = p, n = 2; while (used.has(q)) q = p.replace(/(\.\w+)$/, `_${n++}$1`); used.add(q); return q; };
@@ -1072,7 +1156,7 @@ async function exportZip() {
     zip.file(`${top}/はじめにお読みください.txt`, README);
     btn.textContent = 'ZIPを作成中…';
     const blob = await zip.generateAsync({ type: 'blob' });
-    download(blob, `こども作品ギャラリー_${today()}.zip`);
+    download(blob, `キッズギャラリー_${today()}.zip`);
     await DB.put('meta', { id: 'lastBackup', value: Date.now() });
     toast('書き出しました');
   } catch (err) {
@@ -1252,7 +1336,7 @@ function renderBookPages(c, items) {
 
   // 製本しやすいよう、奥付を含めたページ数を4の倍数に（足りない分は書き込める「メモ」ページ）
   while ((pages.length + 1) % 4) pages.push(pg('p-memo', '<div class="memo-lines"><p>ここに、思い出を書き込めます</p></div>'));
-  pages.push(pg('p-back', `<div><p>${esc(c.name)}の作品集</p><small>作品 ${items.length}点　${esc(today())} 作成</small><small>こども作品ギャラリー</small></div>`));
+  pages.push(pg('p-back', `<div><p>${esc(c.name)}の作品集</p><small>作品 ${items.length}点　${esc(today())} 作成</small><small>キッズギャラリー</small></div>`));
 
   host.innerHTML = pages.join('');
   hydrate(host);
@@ -1433,9 +1517,11 @@ async function cloudPanel() {
     el.innerHTML = head + `<p>家族みんなのスマホで、同じギャラリーを見たり、作品を追加したりできます。写真は<b>あなた専用のクラウド</b>に預けられ、招待した家族だけが見られます。</p>
       <button class="btn primary wide" id="cCreate">🏠 家族のギャラリーをつくる</button>
       <button class="btn wide" id="cJoin">🔑 招待コードで参加する</button>
-      <p class="hint">すでに家族の誰かがつくっている場合は「招待コードで参加」を選んでください。</p>`;
+      <button class="btn wide" id="cDevJoin">📱 ほかの端末で使っている人は、こちら</button>
+      <p class="hint">家族の誰かがつくっていて、あなたははじめてのときは「招待コードで参加」。すでにあなたがほかの端末で使っているときは「ほかの端末で使っている人」を選ぶと、招待をもらいなおさずにつなげます。</p>`;
     $('#cCreate').onclick = cloudCreateModal;
     $('#cJoin').onclick = cloudJoinModal;
+    $('#cDevJoin').onclick = () => cloudDeviceJoinModal();
     return;
   }
   el.innerHTML = head + `<p class="hint">読み込み中…</p>`;
@@ -1457,13 +1543,24 @@ async function cloudPanel() {
     <p class="hint" id="cState">${st[0]} ${st[1]}${Cloud.state.last ? '　最後の同期 ' + new Date(Cloud.state.last).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : ''}</p>
     <div class="members">${inf.members.map(m => `<div class="member"><span>${m.role === 'owner' ? '👑' : '👤'} ${esc(m.name)}${m.id === inf.me.id ? '（あなた）' : ''}</span>${owner && m.id !== inf.me.id ? `<button class="btn small danger" data-rm="${m.id}" data-name="${esc(m.name)}">外す</button>` : ''}</div>`).join('')}</div>
     <button class="btn primary wide" id="cInvite">✉️ 家族を招待する</button>
+    <h3>📱 あなたの端末</h3>
+    <div class="members">${(inf.devices || []).map(d => `<div class="member"><span>${d.id === inf.me.deviceId ? '📍' : '📱'} ${esc(d.name)}${d.id === inf.me.deviceId ? '（この端末）' : ''}<br><small class="hint">最後に使った日：${new Date(d.last_seen).toLocaleDateString('ja-JP')}</small></span>${d.id !== inf.me.deviceId ? `<button class="btn small danger" data-rmdev="${d.id}" data-name="${esc(d.name)}">外す</button>` : ''}</div>`).join('')}</div>
+    <button class="btn wide" id="cDevAdd">📲 あなたの別の端末を追加する</button>
+    <p class="hint">スマホ・タブレット・パソコンなど、同じ人が使う端末を、招待をもらいなおさずに追加できます。</p>
     <button class="btn wide" id="cSync">🔄 いま同期する</button>
     <div class="usage"><div class="bar"><i style="width:${Math.max(pct, inf.usage.bytes ? 1 : 0)}%"></i></div>
       <small>クラウドの使用量 ${fmtMB(inf.usage.bytes)} / ${fmtMB(inf.usage.limit)}（写真${inf.usage.files}ファイル）</small></div>
     <button class="btn danger small" id="cLeave">この端末の共有をやめる</button>`;
   $('#cInvite').onclick = cloudInviteModal;
+  $('#cDevAdd').onclick = cloudDeviceInviteModal;
   $('#cSync').onclick = () => { Cloud.syncNow(); toast('同期しています…'); setTimeout(cloudPanel, 2000); };
   $('#cLeave').onclick = leaveCloud;
+  $$('[data-rmdev]').forEach(b => {
+    b.onclick = async () => {
+      if (!confirm(`「${b.dataset.name}」を外しますか？\n（その端末からは、新しい作品が見られなくなります。端末の中のデータは残ります）`)) return;
+      try { await Cloud.removeDevice(b.dataset.rmdev); toast('外しました'); cloudPanel(); } catch (e) { toast(e.message, 4000); }
+    };
+  });
   $$('[data-rm]').forEach(b => {
     b.onclick = async () => {
       if (!confirm(`「${b.dataset.name}」さんを家族から外しますか？\n（その人のスマホからは、新しい作品が見られなくなります）`)) return;
@@ -1473,8 +1570,8 @@ async function cloudPanel() {
 }
 
 async function leaveCloud() {
-  if (!confirm('この端末の家族共有をやめますか？\n・この端末のデータは残ります\n・クラウドのデータも残り、ほかの家族は使い続けられます')) return;
-  await Cloud.disconnect();
+  if (!confirm('この端末の家族共有をやめますか？\n・この端末のデータは残ります\n・クラウドのデータも残り、ほかの家族は使い続けられます\n・あなたのほかの端末が1台もないときは、戻るのに新しい招待が必要です')) return;
+  await Cloud.leave();
   toast('共有をやめました');
   settings();
 }
@@ -1493,7 +1590,7 @@ function cloudCreateModal() {
     const f = new FormData(e.target), btn = e.submitter;
     btn.disabled = true;
     try {
-      await Cloud.create(f.get('key').trim(), f.get('family').trim(), f.get('me').trim());
+      await Cloud.create(f.get('key').trim(), f.get('family').trim(), f.get('me').trim(), deviceLabel());
       closeModal(); toast('家族のギャラリーをつくりました'); cloudPanel(); updateBadge();
     } catch (err) { toast(err.message, 4000); btn.disabled = false; }
   };
@@ -1512,7 +1609,7 @@ function cloudJoinModal() {
     const f = new FormData(e.target), btn = e.submitter;
     btn.disabled = true;
     try {
-      await Cloud.join(f.get('code').trim(), f.get('me').trim());
+      await Cloud.join(f.get('code').trim(), f.get('me').trim(), deviceLabel());
       closeModal(); toast('家族のギャラリーに参加しました'); cloudPanel(); updateBadge();
     } catch (err) { toast(err.message, 4000); btn.disabled = false; }
   };
@@ -1523,7 +1620,7 @@ async function cloudInviteModal() {
   try { r = await Cloud.invite(); } catch (e) { return toast(e.message, 4000); }
   const code = r.code.slice(0, 4) + '-' + r.code.slice(4);
   const url = location.href.split('#')[0];
-  const text = `こども作品ギャラリーに招待します。\n\n① アプリを開く：${url}\n② ⚙️ →「家族で共有」→「招待コードで参加する」\n③ 招待コード：${code}\n\n（コードは3日間・1回だけ使えます）`;
+  const text = `キッズギャラリーに招待します。\n\n① アプリを開く：${url}\n② ⚙️ →「家族で共有」→「招待コードで参加する」\n③ 招待コード：${code}\n\n（コードは3日間・1回だけ使えます）`;
   const m = openModal(`<h2>✉️ 家族を招待</h2>
     <p>招待コード</p><div class="invite-code">${code}</div>
     <p class="hint">3日間、1人だけが使えます。別の家族を招待するときは、もう一度つくってください。</p>
@@ -1534,6 +1631,70 @@ async function cloudInviteModal() {
     if (navigator.share) { try { await navigator.share({ text }); } catch { } }
     else { try { await navigator.clipboard.writeText(text); toast('共有に未対応のため、コピーしました'); } catch { } }
   };
+}
+
+// この端末の呼び名（「あなたの端末」の一覧に出る）
+function deviceLabel() {
+  const kind = /iPhone|iPod/.test(UA) ? 'iPhone' : isIOS ? 'iPad'
+    : isAndroid ? (/Mobile/.test(UA) ? 'Androidスマホ' : 'Androidタブレット')
+    : /Windows/.test(UA) ? 'Windowsパソコン' : /Macintosh/.test(UA) ? 'Mac' : /CrOS/.test(UA) ? 'Chromebook' : 'パソコン';
+  return `${kind}（${isStandalone() ? 'ホーム画面のアイコン' : 'ブラウザ'}）`;
+}
+
+// 「端末を追加」：いま使っている端末で、追加用のコードとQRを出す
+async function cloudDeviceInviteModal() {
+  let r;
+  try { r = await Cloud.deviceInvite(); } catch (e) { return toast(e.message, 4000); }
+  const code = r.code.slice(0, 4) + '-' + r.code.slice(4);
+  const url = location.href.split('#')[0];
+  const link = `${url}#adddevice/${r.code}`;
+  const until = new Date(r.expires).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+  const text = `キッズギャラリーに、あなたの別の端末を追加します。\n\n① 追加したい端末で、このリンクを開く：\n${link}\n\n（開けないときは、アプリを開いて ⚙️ →「家族で共有」→「ほかの端末で使っている人は、こちら」に、コード ${code} を入れます）\n\n※コードは${until}まで・1回だけ使えます`;
+  const m = openModal(`<h2>📲 あなたの別の端末を追加</h2>
+    <p>追加したい端末で、アプリを開き、「家族で共有」→「ほかの端末で使っている人は、こちら」にこのコードを入れてください。QRコードを読み取っても開けます。</p>
+    <div class="invite-code">${code}</div>
+    <div class="qr-box">${qrSvgTag(link)}</div>
+    <p class="hint">${until}まで有効・1回だけ使えます。追加した端末は、招待をもらいなおさなくても、あなたと同じ名前でつながります。</p>
+    <div class="row"><button class="btn primary" id="dShare">📤 自分に送る</button><button class="btn" id="dCopy">📋 コピー</button><button class="btn" id="dX">閉じる</button></div>`);
+  $('#dX', m).onclick = () => { closeModal(); cloudPanel(); };
+  $('#dCopy', m).onclick = async () => { try { await navigator.clipboard.writeText(text); toast('コピーしました'); } catch { toast('コピーできませんでした'); } };
+  $('#dShare', m).onclick = async () => {
+    if (navigator.share) { try { await navigator.share({ text }); } catch { } }
+    else { try { await navigator.clipboard.writeText(text); toast('共有に未対応のため、コピーしました'); } catch { } }
+  };
+}
+
+// 「端末を追加」：追加される側の端末で、コードを入れてつなぐ
+function cloudDeviceJoinModal(prefill = '') {
+  const iosWarn = isIOS && !isStandalone() && !inAppBrowser
+    ? `<p class="banner">iPhone・iPadでは、Safariとホーム画面のアイコンでデータが別々です。<b>アイコンで使うなら、先に「ホーム画面に追加」</b>して、アイコンから開いてこのコードを入れてください（コードは30分有効です）。<br><button type="button" class="btn small" id="dGuide">追加のしかたを見る</button></p>` : '';
+  const m = openModal(`<h2>📱 ほかの端末で使っている人</h2>
+    <form id="cForm" class="form">
+      ${iosWarn}
+      <p class="hint">すでに使っている端末で、「家族で共有」→「あなたの別の端末を追加する」を押すと、コードが出ます。</p>
+      <label>端末追加コード（8文字）<input name="code" required maxlength="9" autocapitalize="characters" autocomplete="off" value="${esc(prefill)}" placeholder="例：ABCD-EFGH" style="text-transform:uppercase;letter-spacing:.15em"></label>
+      <label>この端末の名前<input name="dev" required maxlength="40" value="${esc(deviceLabel())}"></label>
+      <p class="hint">この端末にすでにある作品も、家族のギャラリーに加わります。</p>
+      <div class="row"><button class="btn primary">つなぐ</button><button type="button" class="btn" id="cX">やめる</button></div></form>`);
+  $('#cX', m).onclick = () => { closeModal(); if (location.hash.startsWith('#adddevice')) go('#settings'); };
+  const g = $('#dGuide', m);
+  if (g) g.onclick = installGuide;
+  $('#cForm', m).onsubmit = async e => {
+    e.preventDefault();
+    const f = new FormData(e.target), btn = e.submitter;
+    btn.disabled = true;
+    try {
+      await Cloud.joinDevice(f.get('code').trim(), f.get('dev').trim());
+      toast('この端末をつなぎました'); updateBadge(); go('#settings');
+    } catch (err) { toast(err.message, 4000); btn.disabled = false; }
+  };
+}
+// QRやリンクから開いたとき：設定の画面を開いて、コード入りで「端末を追加」を出す
+async function adddevice(code = '') {
+  await settings();
+  if (!Cloud.available()) return;
+  if (Cloud.enabled()) return toast('この端末は、すでに家族につながっています', 4000);
+  cloudDeviceJoinModal(code.replace(/[^A-Za-z0-9]/g, '').toUpperCase().replace(/^(.{4})(.+)$/, '$1-$2'));
 }
 
 // 家族の更新が届いたときの画面の更新
@@ -1554,7 +1715,7 @@ Cloud.on(() => {
 });
 
 // ---------- ルーター ----------
-const routes = { home, gallery, item, add, edit, burst, ritual, words, boxes, box, labels, settings, book, goods };
+const routes = { home, gallery, item, add, edit, burst, ritual, words, boxes, box, labels, settings, book, goods, adddevice };
 const TAB_OF = { item: 'gallery', edit: 'gallery', burst: 'add', ritual: 'gallery', box: 'boxes', labels: 'boxes', goods: 'gallery', book: 'gallery' };
 async function router(opts) {
   const keep = opts?.keep === true ? window.scrollY : 0;
@@ -1579,5 +1740,9 @@ window.addEventListener('hashchange', () => router());
     navigator.serviceWorker.register('sw.js').catch(() => { });
   }
   router();
-  Cloud.init().then(updateBadge).catch(e => console.error(e));
+  Cloud.init().then(() => {
+    updateBadge();
+    // 最初の画面（お子さんの登録）は、家族につながっているかどうかで中身が変わるので、つながりを読んだあとに描きなおす
+    if (!S.children.length && ['', '#home'].includes(location.hash) && !$('#modal').classList.contains('open')) router();
+  }).catch(e => console.error(e));
 })();
