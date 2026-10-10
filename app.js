@@ -4,8 +4,8 @@
                 ⑧年齢・学年の自動付与 ⑨名言帳／言い間違い辞典 ⑩プレゼントカード ⑳まるごと書き出し */
 
 // アプリのバージョン（「このアプリについて」に表示。機能を変えたら更新する）
-const APP_VERSION = '1.1.0';
-const APP_VERSION_DATE = '2026-10-09';
+const APP_VERSION = '1.2.0';
+const APP_VERSION_DATE = '2026-10-10';
 
 // ---------- 小さな道具 ----------
 const $ =(s, el = document) => el.querySelector(s);
@@ -47,11 +47,11 @@ async function hydrate(root = document) {
 
 // ---------- 定義 ----------
 const TYPES = {
-  art: { label: '絵', icon: '🎨' },
-  craft: { label: '工作', icon: '✂️' },
-  shodo: { label: '習字', icon: '🖌️' },
+  art: { label: '平面', icon: '🎨' },
+  craft: { label: '立体', icon: '✂️' },
+  shodo: { label: '文字', icon: '🖌️' },
   present: { label: 'プレゼント', icon: '🎁' },
-  photo: { label: '写真', icon: '📷' },
+  photo: { label: '記念写真', icon: '📷' },
   word: { label: 'ことば', icon: '💬' },
 };
 const STATUS = {
@@ -148,8 +148,8 @@ function installHidden() {
 // ホームの上に出す「ホーム画面に追加」の案内（アイコンから開いているときは出さない）
 function installCard() {
   if (isStandalone() || installHidden()) return '';
-  return `<div class="banner install" id="installCard"><span>📲 ホーム画面に追加すると、アプリのようにすぐ開けます</span>
-    <span class="row"><button class="btn small primary" id="instBtn">追加のしかた</button><button class="btn small" id="instLater">あとで</button></span></div>`;
+  return `<div class="banner install" id="installCard"><span>📲 ホーム画面に追加すると、すぐ開けます</span>
+    <span class="row"><button class="btn small primary" id="instBtn">追加</button><button class="btn small" id="instLater">あとで</button></span></div>`;
 }
 function bindInstall() {
   const b = $('#instBtn');
@@ -259,7 +259,7 @@ async function home() {
 function onboarding() {
   view().innerHTML = `
   <section class="hero"><div class="hero-ic">🖼️</div><h1>キッズギャラリー</h1>
-  <p>絵・工作・習字・プレゼント・ことば…<br>捨てられない思い出を、写真でしまっておく場所です。</p></section>
+  <p>平面・立体・文字・記念写真・プレゼント・ことば…<br>捨てられない思い出を、写真でしまっておく場所です。</p></section>
   ${installCard()}
   ${Cloud.available() && !Cloud.enabled() ? `<section class="panel"><h2>👨‍👩‍👧 すでに家族で使っていますか？</h2>
     <p class="hint">ほかの端末や、家族がもう使っているときは、お子さんを登録しなくても、つなぐだけで作品が届きます。</p>
@@ -1517,8 +1517,8 @@ async function cloudPanel() {
     el.innerHTML = head + `<p>家族みんなのスマホで、同じギャラリーを見たり、作品を追加したりできます。写真は<b>あなた専用のクラウド</b>に預けられ、招待した家族だけが見られます。</p>
       <button class="btn primary wide" id="cCreate">🏠 家族のギャラリーをつくる</button>
       <button class="btn wide" id="cJoin">🔑 招待コードで参加する</button>
-      <button class="btn wide" id="cDevJoin">📱 ほかの端末で使っている人は、こちら</button>
-      <p class="hint">家族の誰かがつくっていて、あなたははじめてのときは「招待コードで参加」。すでにあなたがほかの端末で使っているときは「ほかの端末で使っている人」を選ぶと、招待をもらいなおさずにつなげます。</p>`;
+      <button class="btn wide" id="cDevJoin">📱 別の端末で使っている人</button>
+      <p class="hint">家族の誰かがつくっていて、あなたははじめてのときは「招待コードで参加」。すでにあなたがほかの端末で使っているときは「別の端末で使っている人」を選ぶと、招待をもらいなおさずにつなげます。</p>`;
     $('#cCreate').onclick = cloudCreateModal;
     $('#cJoin').onclick = cloudJoinModal;
     $('#cDevJoin').onclick = () => cloudDeviceJoinModal();
@@ -1649,9 +1649,9 @@ async function cloudDeviceInviteModal() {
   const url = location.href.split('#')[0];
   const link = `${url}#adddevice/${r.code}`;
   const until = new Date(r.expires).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
-  const text = `キッズギャラリーに、あなたの別の端末を追加します。\n\n① 追加したい端末で、このリンクを開く：\n${link}\n\n（開けないときは、アプリを開いて ⚙️ →「家族で共有」→「ほかの端末で使っている人は、こちら」に、コード ${code} を入れます）\n\n※コードは${until}まで・1回だけ使えます`;
+  const text = `キッズギャラリーに、あなたの別の端末を追加します。\n\n① 追加したい端末で、このリンクを開く：\n${link}\n\n（開けないときは、アプリを開いて ⚙️ →「家族で共有」→「別の端末で使っている人」に、コード ${code} を入れます）\n\n※コードは${until}まで・1回だけ使えます`;
   const m = openModal(`<h2>📲 あなたの別の端末を追加</h2>
-    <p>追加したい端末で、アプリを開き、「家族で共有」→「ほかの端末で使っている人は、こちら」にこのコードを入れてください。QRコードを読み取っても開けます。</p>
+    <p>追加したい端末で、アプリを開き、「家族で共有」→「別の端末で使っている人」にこのコードを入れてください。QRコードを読み取っても開けます。</p>
     <div class="invite-code">${code}</div>
     <div class="qr-box">${qrSvgTag(link)}</div>
     <p class="hint">${until}まで有効・1回だけ使えます。追加した端末は、招待をもらいなおさなくても、あなたと同じ名前でつながります。</p>
@@ -1668,7 +1668,7 @@ async function cloudDeviceInviteModal() {
 function cloudDeviceJoinModal(prefill = '') {
   const iosWarn = isIOS && !isStandalone() && !inAppBrowser
     ? `<p class="banner">iPhone・iPadでは、Safariとホーム画面のアイコンでデータが別々です。<b>アイコンで使うなら、先に「ホーム画面に追加」</b>して、アイコンから開いてこのコードを入れてください（コードは30分有効です）。<br><button type="button" class="btn small" id="dGuide">追加のしかたを見る</button></p>` : '';
-  const m = openModal(`<h2>📱 ほかの端末で使っている人</h2>
+  const m = openModal(`<h2>📱 別の端末で使っている人</h2>
     <form id="cForm" class="form">
       ${iosWarn}
       <p class="hint">すでに使っている端末で、「家族で共有」→「あなたの別の端末を追加する」を押すと、コードが出ます。</p>

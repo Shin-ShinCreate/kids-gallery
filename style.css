@@ -30,7 +30,7 @@ main { max-width: 720px; margin: 0 auto; padding: 16px; }
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 20; display: flex; align-items: flex-end;
   background: #fff; border-top: 1px solid var(--line); padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
 }
-#tabbar a { flex: 1; display: flex; flex-direction: column; align-items: center; font-size: 11px; color: var(--sub); gap: 1px; }
+#tabbar a { flex: 1; display: flex; flex-direction: column; align-items: center; font-size: 12px; color: var(--sub); gap: 1px; }
 #tabbar a i { font-style: normal; font-size: 22px; line-height: 1.1; }
 #tabbar a.on { color: var(--accent); font-weight: 700; }
 #tabbar a.plus i {
@@ -100,6 +100,9 @@ h2 .count { font-size: 13px; color: var(--sub); font-weight: 400; }
 .qa small { font-size: 12px; color: var(--sub); }
 .qa.big { grid-column: 1 / -1; flex-direction: row; align-items: center; gap: 12px; background: var(--accent); color: #fff; font-size: 30px; }
 .qa.big b { font-size: 19px; margin: 0; }
+.qa.wide { grid-column: 1 / -1; display: grid; grid-template-columns: auto 1fr; column-gap: 12px; align-items: center; }
+.qa.wide b { grid-column: 2; margin: 0; }
+.qa.wide small { grid-column: 2; }
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 16px 0; }
 .stats div { background: #fff; border-radius: 14px; padding: 10px 4px; text-align: center; box-shadow: var(--shadow); }
 .stats b { display: block; font-size: 24px; color: var(--accent); }
@@ -326,7 +329,10 @@ input.mini { font-size: 13px; padding: 7px 10px; border-radius: 0; border: 0; bo
 .invite-code { font-size: 36px; font-weight: 700; letter-spacing: .12em; text-align: center; background: #fff; border: 2px dashed var(--accent); border-radius: 14px; padding: 14px 6px; margin: 6px 0 10px; color: var(--accent); }
 
 /* ホーム画面に追加の案内・端末追加 */
-.banner.install { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; background: #eaf6ee; border-color: #b7dcc2; }
+.banner.install { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; background: #eaf6ee; border-color: #b7dcc2; }
+.banner.install > span:first-child { flex: 1; min-width: 0; font-size: 13px; line-height: 1.45; }
+.banner.install .row { flex: none; flex-wrap: nowrap; margin: 0; gap: 6px; }
+.banner.install .btn { white-space: nowrap; }
 .banner.install[hidden] { display: none; }
 .steps { padding-left: 22px; margin: 8px 0 14px; line-height: 1.7; }
 .steps li { margin: 8px 0; }
