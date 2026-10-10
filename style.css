@@ -338,3 +338,6 @@ input.mini { font-size: 13px; padding: 7px 10px; border-radius: 0; border: 0; bo
 .steps li { margin: 8px 0; }
 .qr-box { width: 200px; max-width: 70%; margin: 4px auto 10px; background: #fff; padding: 10px; border-radius: 12px; border: 1px solid var(--line); }
 .qr-box svg { display: block; width: 100%; height: auto; }
+
+/* 自作のアイコン（積み木）：まわりの文字の大きさに合わせる */
+.ic { width: 1em; height: 1em; display: inline-block; vertical-align: -0.14em; }

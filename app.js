@@ -4,7 +4,7 @@
                 ⑧年齢・学年の自動付与 ⑨名言帳／言い間違い辞典 ⑩プレゼントカード ⑳まるごと書き出し */
 
 // アプリのバージョン（「このアプリについて」に表示。機能を変えたら更新する）
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.2.1';
 const APP_VERSION_DATE = '2026-10-10';
 
 // ---------- 小さな道具 ----------
@@ -46,12 +46,14 @@ async function hydrate(root = document) {
 }
 
 // ---------- 定義 ----------
+// 立体のアイコン：積み木（赤い四角・青い四角・黄色い三角）。絵文字にぴったりのものがないので、絵を自作
+const BLOCKS_ICON = '<svg class="ic" width="1em" height="1em" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="13" width="9.5" height="9.5" rx="1.4" fill="#e8604c"/><rect x="12.5" y="13" width="9.5" height="9.5" rx="1.4" fill="#4f9bc9"/><path d="M12 1.8 19.2 12.2H4.8Z" fill="#f6c453" stroke="#f6c453" stroke-width="1.6" stroke-linejoin="round"/></svg>';
 const TYPES = {
   art: { label: '平面', icon: '🎨' },
-  craft: { label: '立体', icon: '✂️' },
+  craft: { label: '立体', icon: BLOCKS_ICON, text: '🧱' },
   shodo: { label: '文字', icon: '🖌️' },
   present: { label: 'プレゼント', icon: '🎁' },
-  photo: { label: '記念写真', icon: '📷' },
+  photo: { label: 'プチ記念', icon: '📷' },
   word: { label: 'ことば', icon: '💬' },
 };
 const STATUS = {
@@ -259,7 +261,7 @@ async function home() {
 function onboarding() {
   view().innerHTML = `
   <section class="hero"><div class="hero-ic">🖼️</div><h1>キッズギャラリー</h1>
-  <p>平面・立体・文字・記念写真・プレゼント・ことば…<br>捨てられない思い出を、写真でしまっておく場所です。</p></section>
+  <p>平面・立体・文字・プチ記念・プレゼント・ことば…<br>捨てられない思い出を、写真でしまっておく場所です。</p></section>
   ${installCard()}
   ${Cloud.available() && !Cloud.enabled() ? `<section class="panel"><h2>👨‍👩‍👧 すでに家族で使っていますか？</h2>
     <p class="hint">ほかの端末や、家族がもう使っているときは、お子さんを登録しなくても、つなぐだけで作品が届きます。</p>
@@ -767,7 +769,7 @@ function burstReview() {
     view().innerHTML = `<h1 class="page-title">まとめて整理（${burstShots.length}枚）</h1>
     <form id="bForm" class="form panel">
       <label>だれの？<select name="childId">${childOptions(defaultChild())}</select></label>
-      <label>種類<select name="type">${Object.entries(TYPES).filter(([k]) => k !== 'word').map(([k, v]) => `<option value="${k}">${v.icon} ${v.label}</option>`).join('')}</select></label>
+      <label>種類<select name="type">${Object.entries(TYPES).filter(([k]) => k !== 'word').map(([k, v]) => `<option value="${k}">${v.text || v.icon} ${v.label}</option>`).join('')}</select></label>
       <label>いつごろ？<input type="date" name="date" value="${today()}" required><span class="age-preview" id="agePrev"></span></label>
       <p class="hint">日付はだいたいでOK。あとから1枚ずつ直せます。</p>
       <label>現物は？<select name="status">
