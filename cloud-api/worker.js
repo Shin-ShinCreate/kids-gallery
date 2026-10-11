@@ -49,12 +49,12 @@ function corsHeaders(req, env) {
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const cors = corsHeaders(req, env);
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     let res;
     try {
-      res = await route(req, env, new URL(req.url));
+      res = await route(req, env, new URL(req.url), ctx);
     } catch (e) {
       if (e instanceof HttpError) res = json({ error: e.message }, e.status);
       else { console.error(e); res = json({ error: 'サーバーでエラーが起きました' }, 500); }
@@ -104,7 +104,7 @@ async function auth(req, env) {
   return row;
 }
 
-async function route(req, env, url) {
+async function route(req, env, url, ctx) {
   const p = url.pathname, method = req.method;
   if (p === '/' || p === '/api/health') return json({ ok: true, name: 'kids-gallery-api' });
   if (!p.startsWith('/api/')) fail(404, 'not found');
@@ -112,18 +112,27 @@ async function route(req, env, url) {
   if (p === '/api/family' && method === 'POST') return createFamily(req, env);
   if (p === '/api/join' && method === 'POST') return joinFamily(req, env);
   if (p === '/api/device-join' && method === 'POST') return joinDevice(req, env);
+  if (p === '/api/push/key' && method === 'GET') return json({ publicKey: env.VAPID_PUBLIC_KEY || '' });
 
   const me = await auth(req, env);
   if (p === '/api/family' && method === 'GET') return familyInfo(env, me);
   if (p === '/api/invite' && method === 'POST') return createInvite(env, me);
   if (p === '/api/device-invite' && method === 'POST') return createDeviceInvite(env, me);
   if (p === '/api/sync' && method === 'GET') return pullDocs(env, me, url);
-  if (p === '/api/sync' && method === 'POST') return pushDocs(req, env, me);
+  if (p === '/api/sync' && method === 'POST') return pushDocs(req, env, me, ctx);
+  if (p === '/api/family/rename' && method === 'POST') return renameFamily(req, env, me);
+  if (p === '/api/claim-owner' && method === 'POST') return claimOwner(req, env, me);
+  if (p === '/api/push/subscribe' && method === 'POST') return pushSubscribe(req, env, me);
+  if (p === '/api/push/unsubscribe' && method === 'POST') return pushUnsubscribe(req, env, me);
 
   let m = /^\/api\/members\/([\w-]+)$/.exec(p);
   if (m && method === 'DELETE') return removeMember(env, me, m[1]);
   m = /^\/api\/members\/([\w-]+)\/merge$/.exec(p);
   if (m && method === 'POST') return mergeMember(req, env, me, m[1]);
+  m = /^\/api\/members\/([\w-]+)\/rename$/.exec(p);
+  if (m && method === 'POST') return renameMember(req, env, me, m[1]);
+  m = /^\/api\/devices\/([\w-]+)\/rename$/.exec(p);
+  if (m && method === 'POST') return renameDevice(req, env, me, m[1]);
   m = /^\/api\/devices\/([\w-]+)$/.exec(p);
   if (m && method === 'DELETE') return removeDevice(env, me, m[1]);
   m = /^\/api\/blob\/([\w-]+)$/.exec(p);
@@ -230,6 +239,7 @@ async function createDeviceInvite(env, me) {
 async function removeDevice(env, me, id) {
   const r = await env.DB.prepare('UPDATE devices SET revoked = 1 WHERE id = ? AND member_id = ? AND revoked = 0').bind(id, me.id).run();
   if (!r.meta.changes) fail(404, '端末が見つかりません');
+  await env.DB.prepare('DELETE FROM push_subs WHERE device_id = ?').bind(id).run();
   return json({ ok: true });
 }
 
@@ -239,6 +249,7 @@ async function removeMember(env, me, id) {
   const r = await env.DB.prepare('UPDATE members SET revoked = 1 WHERE id = ? AND family_id = ? AND role != ?')
     .bind(id, me.family_id, 'owner').run();
   if (!r.meta.changes) fail(404, 'メンバーが見つかりません');
+  await env.DB.prepare('DELETE FROM push_subs WHERE member_id = ?').bind(id).run();
   return json({ ok: true });
 }
 
@@ -265,10 +276,144 @@ async function mergeMember(req, env, me, fromId) {
       .bind(toId, now, now, fromId),
     env.DB.prepare("UPDATE members SET token_hash = 'moved:' || id WHERE id = ?").bind(fromId),
     env.DB.prepare('UPDATE devices SET member_id = ? WHERE member_id = ?').bind(toId, fromId),
+    env.DB.prepare('UPDATE push_subs SET member_id = ? WHERE member_id = ?').bind(toId, fromId),
     env.DB.prepare('DELETE FROM device_invites WHERE member_id = ?').bind(fromId),
     env.DB.prepare('UPDATE members SET revoked = 1 WHERE id = ?').bind(fromId),
   ]);
   return json({ ok: true });
+}
+
+// ---------- 名前の変更 ----------
+// 自分の名前は自分で、ほかの人の名前は「つくった人」が変えられる
+async function renameMember(req, env, me, id) {
+  if (id !== me.id && me.role !== 'owner') fail(403, 'ほかの人の名前を変えられるのは、家族をつくった人だけです');
+  const name = String((await readJson(req)).name || '').trim().slice(0, 40);
+  if (!name) fail(400, '名前を入れてください');
+  const r = await env.DB.prepare('UPDATE members SET name = ? WHERE id = ? AND family_id = ? AND revoked = 0').bind(name, id, me.family_id).run();
+  if (!r.meta.changes) fail(404, 'メンバーが見つかりません');
+  return json({ ok: true, name });
+}
+// 自分の端末の名前を変える（「パパのiPhone」など、見分けやすくするため）
+async function renameDevice(req, env, me, id) {
+  const name = String((await readJson(req)).name || '').trim().slice(0, 40);
+  if (!name) fail(400, '名前を入れてください');
+  const r = await env.DB.prepare('UPDATE devices SET name = ? WHERE id = ? AND member_id = ? AND revoked = 0').bind(name, id, me.id).run();
+  if (!r.meta.changes) fail(404, '端末が見つかりません');
+  return json({ ok: true, name });
+}
+async function renameFamily(req, env, me) {
+  if (me.role !== 'owner') fail(403, '家族の名前を変えられるのは、家族をつくった人だけです');
+  const name = String((await readJson(req)).name || '').trim().slice(0, 40);
+  if (!name) fail(400, '名前を入れてください');
+  await env.DB.prepare('UPDATE families SET name = ? WHERE id = ?').bind(name, me.family_id).run();
+  return json({ ok: true, name });
+}
+
+// 「つくった人」を引き継ぐ：つくった人の端末をなくしたときなどに、設定キーを知っている人が自分を「つくった人」にする。
+// 前のつくった人は「参加した人」になる（家族からは外れない）。
+async function claimOwner(req, env, me) {
+  const b = await readJson(req);
+  if (!env.SETUP_KEY || !safeEqual(b.setupKey || '', env.SETUP_KEY)) fail(403, '設定キーが違います');
+  if (me.role === 'owner') return json({ ok: true, role: 'owner' });
+  await env.DB.batch([
+    env.DB.prepare("UPDATE members SET role = 'member' WHERE family_id = ? AND role = 'owner'").bind(me.family_id),
+    env.DB.prepare("UPDATE members SET role = 'owner' WHERE id = ?").bind(me.id),
+  ]);
+  return json({ ok: true, role: 'owner' });
+}
+
+// ---------- プッシュ通知（家族が作品を追加したときのお知らせ） ----------
+async function pushSubscribe(req, env, me) {
+  const b = await readJson(req);
+  const endpoint = String(b.endpoint || ''), p256dh = String(b.keys?.p256dh || ''), authKey = String(b.keys?.auth || '');
+  if (!/^https?:\/\//.test(endpoint) || endpoint.length > 1000 || !p256dh || !authKey) fail(400, '通知の登録内容が正しくありません');
+  await env.DB.prepare(
+    `INSERT INTO push_subs (endpoint, family_id, member_id, device_id, p256dh, auth, created) VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (endpoint) DO UPDATE SET family_id = excluded.family_id, member_id = excluded.member_id, device_id = excluded.device_id, p256dh = excluded.p256dh, auth = excluded.auth`
+  ).bind(endpoint, me.family_id, me.id, me.device_id, p256dh, authKey, Date.now()).run();
+  return json({ ok: true });
+}
+async function pushUnsubscribe(req, env, me) {
+  const endpoint = String((await readJson(req)).endpoint || '');
+  await env.DB.prepare('DELETE FROM push_subs WHERE endpoint = ? AND device_id = ?').bind(endpoint, me.device_id).run();
+  return json({ ok: true });
+}
+
+const TYPE_LABEL = { art: '平面', craft: '立体', shodo: '文字', present: 'プレゼント', photo: 'プチ記念', word: 'ことば' };
+// 新しく追加された作品を、追加した人以外の端末に知らせる
+async function notifyNewItems(env, me, items) {
+  if (!env.VAPID_PRIVATE_KEY || !env.VAPID_PUBLIC_KEY) return;
+  const subs = (await env.DB.prepare('SELECT endpoint, p256dh, auth FROM push_subs WHERE family_id = ? AND member_id != ?')
+    .bind(me.family_id, me.id).all()).results;
+  if (!subs.length) return;
+  let body, url = '#home';
+  if (items.length === 1) {
+    const d = items[0];
+    const what = d.type === 'word'
+      ? `ことば「${String(d.word?.text || '').slice(0, 30)}」`
+      : `${TYPE_LABEL[d.type] || '作品'}「${String(d.title || TYPE_LABEL[d.type] || '').slice(0, 30)}」`;
+    body = `${me.name}が ${what} をしまいました`;
+    url = '#item/' + d.id;
+  } else {
+    body = `${me.name}が ${items.length}点 しまいました`;
+  }
+  const payload = JSON.stringify({ title: 'キッズギャラリー', body, url, tag: 'kg-new-' + me.family_id });
+  const gone = [];
+  await Promise.all(subs.map(async sub => {
+    try {
+      const res = await sendPush(env, sub, payload);
+      if (res.status === 404 || res.status === 410) gone.push(sub.endpoint); // 通知の登録が無効になった
+    } catch (e) { console.error('push', e); }
+  }));
+  if (gone.length) await env.DB.prepare(`DELETE FROM push_subs WHERE endpoint IN (${gone.map(() => '?').join(',')})`).bind(...gone).run();
+}
+
+// --- Web Push の送信（RFC 8291 の暗号化 aes128gcm ＋ RFC 8292 の VAPID 署名） ---
+const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64u = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), c => c.charCodeAt(0));
+const concat = (...arrs) => { const out = new Uint8Array(arrs.reduce((n, a) => n + a.length, 0)); let o = 0; for (const a of arrs) { out.set(a, o); o += a.length; } return out; };
+const te = new TextEncoder();
+async function hkdf(salt, ikm, info, bytes) {
+  const key = await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']);
+  return new Uint8Array(await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info }, key, bytes * 8));
+}
+async function vapidAuth(env, endpoint) {
+  const pub = unb64u(env.VAPID_PUBLIC_KEY);
+  const key = await crypto.subtle.importKey('jwk', {
+    kty: 'EC', crv: 'P-256', d: env.VAPID_PRIVATE_KEY, x: b64u(pub.slice(1, 33)), y: b64u(pub.slice(33, 65)), ext: true,
+  }, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
+  const head = b64u(te.encode(JSON.stringify({ typ: 'JWT', alg: 'ES256' })));
+  const claims = b64u(te.encode(JSON.stringify({
+    aud: new URL(endpoint).origin, exp: Math.floor(Date.now() / 1000) + 12 * 3600,
+    sub: env.VAPID_SUBJECT || 'https://shin-shincreate.github.io/kids-gallery/',
+  })));
+  const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, te.encode(head + '.' + claims));
+  return `vapid t=${head}.${claims}.${b64u(sig)}, k=${env.VAPID_PUBLIC_KEY}`;
+}
+async function encryptPayload(p256dh, authSecret, text) {
+  const uaPub = unb64u(p256dh), secret = unb64u(authSecret);
+  const eph = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+  const asPub = new Uint8Array(await crypto.subtle.exportKey('raw', eph.publicKey));
+  const uaKey = await crypto.subtle.importKey('raw', uaPub, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+  const shared = new Uint8Array(await crypto.subtle.deriveBits({ name: 'ECDH', public: uaKey }, eph.privateKey, 256));
+  const ikm = await hkdf(secret, shared, concat(te.encode('WebPush: info\0'), uaPub, asPub), 32);
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const cek = await hkdf(salt, ikm, te.encode('Content-Encoding: aes128gcm\0'), 16);
+  const nonce = await hkdf(salt, ikm, te.encode('Content-Encoding: nonce\0'), 12);
+  const aes = await crypto.subtle.importKey('raw', cek, 'AES-GCM', false, ['encrypt']);
+  const cipher = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, aes, concat(te.encode(text), new Uint8Array([2]))));
+  const rs = new Uint8Array([0, 0, 16, 0]); // レコードサイズ 4096
+  return concat(salt, rs, new Uint8Array([asPub.length]), asPub, cipher);
+}
+async function sendPush(env, sub, text) {
+  return fetch(sub.endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: await vapidAuth(env, sub.endpoint),
+      'Content-Encoding': 'aes128gcm', 'Content-Type': 'application/octet-stream', TTL: '86400', Urgency: 'normal',
+    },
+    body: await encryptPayload(sub.p256dh, sub.auth, text),
+  });
 }
 
 // ---------- 同期 ----------
@@ -291,7 +436,7 @@ const blobRefs = data => {
   } catch { return []; }
 };
 
-async function pushDocs(req, env, me) {
+async function pushDocs(req, env, me, ctx) {
   const b = await readJson(req, 4 * 1024 * 1024);
   const docs = Array.isArray(b.docs) ? b.docs : fail(400, '形式が正しくありません');
   if (docs.length > 20) fail(413, '一度に送れるのは20件までです');
@@ -336,6 +481,13 @@ async function pushDocs(req, env, me) {
   }
   await env.DB.batch(stmts);
   if (stale.size) await env.BLOBS.delete([...stale].map(id => `${fid}/${id}`));
+  // 家族にとって新しい作品（はじめて届いた・削除から戻った）だけを知らせる。返事を待たせないよう、裏で送る
+  const fresh = accepted.filter(d => d.kind === 'items' && !d.deleted && (!ex.get('items:' + d.id) || ex.get('items:' + d.id).deleted))
+    .map(d => { try { return JSON.parse(d.data); } catch { return null; } }).filter(Boolean);
+  if (fresh.length) {
+    const job = notifyNewItems(env, me, fresh).catch(e => console.error('notify', e));
+    if (ctx?.waitUntil) ctx.waitUntil(job); else await job;
+  }
   return json({ ok: true, applied: accepted.length });
 }
 

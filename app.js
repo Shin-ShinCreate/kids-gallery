@@ -4,7 +4,7 @@
                 ⑧年齢・学年の自動付与 ⑨名言帳／言い間違い辞典 ⑩プレゼントカード ⑳まるごと書き出し */
 
 // アプリのバージョン（「このアプリについて」に表示。機能を変えたら更新する）
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 const APP_VERSION_DATE = '2026-10-11';
 
 // ---------- 小さな道具 ----------
@@ -49,12 +49,12 @@ async function hydrate(root = document) {
 // 立体のアイコン：積み木（赤い四角・青い四角・黄色い三角）。絵文字にぴったりのものがないので、絵を自作
 const BLOCKS_ICON = '<svg class="ic" width="1em" height="1em" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="13" width="9.5" height="9.5" rx="1.4" fill="#e8604c"/><rect x="12.5" y="13" width="9.5" height="9.5" rx="1.4" fill="#4f9bc9"/><path d="M12 1.8 19.2 12.2H4.8Z" fill="#f6c453" stroke="#f6c453" stroke-width="1.6" stroke-linejoin="round"/></svg>';
 const TYPES = {
-  art: { label: '平面', icon: '🎨' },
-  craft: { label: '立体', icon: BLOCKS_ICON, text: '🧱' },
-  shodo: { label: '文字', icon: '🖌️' },
-  present: { label: 'プレゼント', icon: '🎁' },
-  photo: { label: 'プチ記念', icon: '📷' },
-  word: { label: 'ことば', icon: '💬' },
+  art: { label: '平面', icon: '🎨', ex: '絵・ぬりえ・切り絵' },
+  craft: { label: '立体', icon: BLOCKS_ICON, text: '🧱', ex: '工作・ねんど・ブロック' },
+  shodo: { label: '文字', icon: '🖌️', ex: '習字・お手紙・ノート' },
+  present: { label: 'プレゼント', icon: '🎁', ex: 'もらった物と言葉' },
+  photo: { label: 'プチ記念', icon: '📷', ex: '運動会・発表会など' },
+  word: { label: 'ことば', icon: '💬', ex: '名言・言い間違い' },
 };
 const STATUS = {
   keep: { label: '手元に保管', icon: '📦' },
@@ -117,6 +117,13 @@ const boxOptions = sel => `<option value="">（未設定）</option>` + S.boxes.
 const defaultChild = () => (S.filterChild !== 'all' ? S.filterChild : S.children[0]?.id);
 
 // ---------- 共通パーツ ----------
+// 「‹ もどる」：前の画面へ（アプリ内で来ていないときは、決まった画面へ）
+const NAV = { count: 0 }; // アプリの中で画面を移動した回数（お知らせやQRから直接開いたときは、戻り先がない）
+const backBtn = () => '<button type="button" class="back" id="backBtn">‹ もどる</button>';
+function bindBack(fallback) {
+  const b = $('#backBtn');
+  if (b) b.onclick = () => (NAV.count > 1 ? history.back() : go(fallback));
+}
 function childChips() {
   if (S.children.length < 2) return '';
   return `<div class="chips" id="childChips"><button data-c="all" class="chip ${S.filterChild === 'all' ? 'on' : ''}">みんな</button>${S.children.map(c => `<button data-c="${c.id}" class="chip ${S.filterChild === c.id ? 'on' : ''}" style="--cc:${c.color}">${esc(c.name)}</button>`).join('')}</div>`;
@@ -229,11 +236,15 @@ async function home() {
     return { c, n, fresh: n - (made[c.id] || 0) };
   }).filter(x => x.fresh >= 12 && (S.filterChild === 'all' || S.filterChild === x.c.id))[0];
 
+  // 案内の帯は1つまで（ホーム画面に追加の案内が出ているときは、お知らせの案内を出さない）
+  const ins = installCard();
+  const nudge = ins ? '' : await notifyNudge();
   view().innerHTML = `
-  ${installCard()}
+  ${ins}
   ${childChips()}
   ${bookFor ? `<a class="banner book" href="#book/${bookFor.c.id}">📕 ${esc(bookFor.c.name)}の作品が${bookFor.n}点になりました。作品集（ART BOOK）を自動で作ってみませんか？ →</a>` : ''}
-  ${needBackup ? `<a class="banner" href="#settings">💾 ${last ? '前回のバックアップから30日以上たちました' : 'まだ一度も書き出していません'}。思い出を守るために書き出しましょう →</a>` : ''}
+  ${nudge}
+  ${needBackup ? `<a class="banner" href="#settings/backup">💾 ${last ? '前回のバックアップから30日以上たちました' : 'まだ一度も書き出していません'}。思い出を守るために書き出しましょう →</a>` : ''}
   <section class="quick">
     <a href="#add" class="qa big">📷<b>作品を撮ってしまう</b></a>
     <a href="#burst" class="qa">⚡<b>連続撮影</b><small>たまった作品を一気に</small></a>
@@ -252,9 +263,10 @@ async function home() {
     <div><b>${things.filter(i => i.status === 'keep').length}</b><span>現物を保管中</span></div>
     <div><b>${things.filter(i => i.status === 'released').length}</b><span>手放せた現物</span></div>
   </section>
-  <section><h2>さいきん しまったもの</h2>${recent.length ? `<div class="grid">${recent.map(card).join('')}</div>` : '<p class="empty">まだありません。まずは1枚撮ってみましょう！</p>'}</section>`;
+  <section><h2>さいきん しまったもの${recent.length ? '<a class="more-link push" href="#gallery">すべて見る ›</a>' : ''}</h2>${recent.length ? `<div class="grid">${recent.map(card).join('')}</div>` : '<div class="empty-card"><div class="empty-ic">📷</div><p>まだありません。まずは1枚撮ってみましょう！</p><a class="btn primary" href="#add">＋ しまう</a></div>'}</section>`;
   bindChildChips(home);
   bindInstall();
+  bindNotifyNudge();
   hydrate(view());
 }
 
@@ -265,7 +277,7 @@ function onboarding() {
   ${installCard()}
   ${Cloud.available() && !Cloud.enabled() ? `<section class="panel"><h2>👨‍👩‍👧 すでに家族で使っていますか？</h2>
     <p class="hint">ほかの端末や、家族がもう使っているときは、お子さんを登録しなくても、つなぐだけで作品が届きます。</p>
-    <a class="btn wide" href="#settings">家族の共有につなぐ</a></section>` : ''}
+    <a class="btn wide" href="#settings/family">👨‍👩‍👧 家族の共有につなぐ</a></section>` : ''}
   <section class="panel"><h2>まずはお子さんを登録</h2>${childFormHTML()}</section>`;
   bindChildForm(null, () => go('#home'));
   bindInstall();
@@ -316,7 +328,9 @@ async function gallery() {
   ${childChips()}
   <div class="chips" id="typeChips">${typeChips.map(([k, l]) => `<button class="chip ${G.type === k ? 'on' : ''}" data-t="${k}">${l}</button>`).join('')}</div>
   <div class="chips small" id="statusChips">${statusChips.map(([k, l]) => `<button class="chip ${G.status === k ? 'on' : ''}" data-s="${k}">${l}</button>`).join('')}</div>
-  ${items.length ? [...groups].map(([fy, list]) => `<section>${header(fy, list)}<div class="grid">${list.map(card).join('')}</div></section>`).join('') : '<p class="empty">該当する作品はありません</p>'}`;
+  ${items.length ? [...groups].map(([fy, list]) => `<section>${header(fy, list)}<div class="grid">${list.map(card).join('')}</div></section>`).join('')
+    : S.items.some(i => i.type !== 'word') ? '<p class="empty">この条件に合う作品はありません</p>'
+    : '<div class="empty-card"><div class="empty-ic">🖼️</div><p>まだ作品がありません。<br>下の「＋」から、しまってみましょう。</p><a class="btn primary" href="#add">＋ しまう</a></div>'}`;
   bindChildChips(gallery);
   $$('#typeChips .chip').forEach(b => { b.onclick = () => { G.type = b.dataset.t; gallery(); }; });
   $$('#statusChips .chip').forEach(b => { b.onclick = () => { G.status = b.dataset.s; gallery(); }; });
@@ -329,6 +343,7 @@ async function item(id) {
   if (!i) { view().innerHTML = '<p class="empty">見つかりません</p>'; return; }
   const c = childById(i.childId);
   view().innerHTML = `
+  ${backBtn()}
   <div class="detail">
     ${i.photos?.length ? `<div class="carousel">${i.photos.map(p => `<img data-blob="${p.full}" alt="">`).join('')}</div>${i.photos.length > 1 ? `<p class="hint center">← スワイプで${i.photos.length}枚 →</p>` : ''}` : ''}
     ${i.type === 'word' ? `<blockquote class="big-quote">「${esc(i.word.text)}」</blockquote>${i.word.mistake && i.word.correct ? `<p class="mistake">📖 言い間違い辞典：「${esc(i.word.text)}」→ 正しくは「${esc(i.word.correct)}」</p>` : ''}` : ''}
@@ -345,6 +360,7 @@ async function item(id) {
     <div class="row"><a class="btn" href="${i.type === 'word' ? '#words/edit/' + i.id : '#edit/' + i.id}">✏️ 編集</a><button class="btn danger" id="del">🗑️ 削除</button></div>
   </div>`;
   hydrate(view());
+  bindBack('#gallery');
 
   $('#del').onclick = async () => {
     if (!confirm('この思い出を削除しますか？（元に戻せません）')) return;
@@ -398,7 +414,8 @@ async function add(type) {
   if (type === 'word') return go('#words/new');
   if (!type || !TYPES[type]) {
     view().innerHTML = `<h1 class="page-title">何をしまう？</h1>
-    <div class="type-grid">${Object.entries(TYPES).map(([k, v]) => `<a class="type-btn" href="${k === 'word' ? '#words/new' : '#add/' + k}"><span>${v.icon}</span>${v.label}</a>`).join('')}</div>
+    <p class="hint lead">種類を選ぶと、写真を撮る画面に進みます。</p>
+    <div class="type-grid">${Object.entries(TYPES).map(([k, v]) => `<a class="type-btn" href="${k === 'word' ? '#words/new' : '#add/' + k}"><span>${v.icon}</span>${v.label}<small>${v.ex}</small></a>`).join('')}</div>
     <a class="btn wide" href="#burst">⚡ たくさんある時は「連続撮影」</a>`;
     return;
   }
@@ -887,7 +904,7 @@ async function words(mode, id) {
   view().innerHTML = `${childChips()}
   <div class="seg" id="wTabs"><button data-w="all" class="${mist ? '' : 'on'}">💬 名言帳</button><button data-w="mistake" class="${mist ? 'on' : ''}">📖 言い間違い辞典</button></div>
   <a class="btn primary wide" href="#words/new">＋ ことばを残す</a>
-  ${!list.length ? `<p class="empty">${mist ? '「言い間違い」にチェックを付けたことばが、ここに辞典のように並びます' : 'まだありません。こどもの「今しか言わない言葉」を残しましょう'}</p>` :
+  ${!list.length ? `<div class="empty-card"><div class="empty-ic">${mist ? '📖' : '💬'}</div><p>${mist ? '「言い間違い」にチェックを付けたことばが、<br>ここに辞典のように並びます' : 'まだありません。<br>こどもの「今しか言わない言葉」を残しましょう'}</p></div>` :
     mist ? list.map(i => { const c = childById(i.childId); return `<a class="dict-row" href="#item/${i.id}"><span class="wrong">${esc(i.word.text)}</span><span class="arrow">→</span><span class="right">${esc(i.word.correct || '？')}</span><small>${esc(c?.name || '')}・${esc(ageLabel(c?.birth, i.date))}（${esc(i.date)}）</small></a>`; }).join('')
       : `<div class="word-list">${list.map(i => { const c = childById(i.childId); return `<a class="word-item" href="#item/${i.id}"><div class="quote">「${esc(i.word.text)}」</div>${i.memo ? `<div class="scene">${esc(i.memo)}</div>` : ''}<div class="meta">${esc(c?.name || '')}・${esc(itemAge(i))}・${esc(i.date)}${i.audio ? ' 🎙️' : ''}</div></a>`; }).join('')}</div>`}`;
   bindChildChips(() => words());
@@ -966,7 +983,7 @@ async function boxes() {
     <div><b>${by('keep')}</b><span>📦 手元</span></div><div><b>${by('jikka')}</b><span>🏠 実家</span></div><div><b>${by('released')}</b><span>🕊️ 手放した</span></div>
   </section>
   <section><h2>保管箱${S.boxes.length ? '<a class="btn small push" href="#labels">🏷️ QRラベルを印刷</a>' : ''}</h2>
-    ${S.boxes.length ? S.boxes.map(b => `<a class="box-row" href="#box/${b.id}"><span class="box-ic">📦</span><div><b>${esc(b.name)}</b><small>${esc(b.location || '置き場所 未設定')}</small></div><span class="count">${inBox(b.id)}点</span></a>`).join('') : '<p class="empty">まだ箱がありません。下から追加しましょう</p>'}
+    ${S.boxes.length ? S.boxes.map(b => `<a class="box-row" href="#box/${b.id}"><span class="box-ic">📦</span><div><b>${esc(b.name)}</b><small>${esc(b.location || '置き場所 未設定')}</small></div><span class="count">${inBox(b.id)}点</span></a>`).join('') : '<div class="empty-card"><div class="empty-ic">📦</div><p>まだ箱がありません。<br>箱を作ると、作品を「どの箱に入れたか」記録でき、<br>QRラベルを貼って中身をスマホで見られます。</p></div>'}
     ${noBox ? `<p class="hint">※ 箱が決まっていない保管品が ${noBox}点 あります（作品の画面で箱を選べます）</p>` : ''}
   </section>
   <form id="boxForm" class="form panel"><h2>箱を追加</h2>
@@ -987,7 +1004,7 @@ async function box(id) {
   const b = S.boxes.find(x => x.id === id);
   if (!b) { view().innerHTML = '<p class="empty">この箱は見つかりません。<br>（別の端末で作った箱かもしれません）</p>'; return; }
   const its = S.items.filter(i => i.boxId === id && i.status === 'keep');
-  view().innerHTML = `<h1 class="page-title">📦 ${esc(b.name)}の中身</h1>
+  view().innerHTML = `${backBtn()}<h1 class="page-title">📦 ${esc(b.name)}の中身</h1>
   <p class="hint">置き場所：${esc(b.location || '未設定')}</p>
   ${its.length ? `<div class="grid">${its.map(card).join('')}</div>` : '<p class="empty">この箱に入っている作品はまだありません</p>'}
   <form id="boxEdit" class="form panel"><h2>箱の情報</h2>
@@ -995,6 +1012,7 @@ async function box(id) {
     <label>置き場所<input name="location" value="${esc(b.location || '')}"></label>
     <div class="row"><button class="btn primary">保存</button><button type="button" class="btn danger" id="boxDel">箱を削除</button></div></form>`;
   hydrate(view());
+  bindBack('#boxes');
   $('#boxEdit').onsubmit = async e => {
     e.preventDefault();
     const f = new FormData(e.target);
@@ -1030,30 +1048,88 @@ function labels() {
   $('#doPrint').onclick = () => print();
 }
 
-// ---------- 設定・書き出し（アイデア⑳） ----------
-async function settings() {
-  const est = await navigator.storage?.estimate?.().catch(() => null);
+// ---------- 設定（メニュー → 各ページ）・書き出し（アイデア⑳） ----------
+const SETTINGS_PAGES = {
+  family: ['👨‍👩‍👧', '家族で共有'], notify: ['🔔', 'お知らせ'], children: ['👧', 'こども'],
+  backup: ['💾', 'バックアップ・作品集'], about: ['ℹ️', 'このアプリについて'],
+};
+const menuRow = (href, ic, title, sub = '') => `<a class="menu-row" href="${href}"><span class="menu-ic">${ic}</span><span class="menu-txt"><b>${title}</b>${sub ? `<small>${sub}</small>` : ''}</span><span class="chev" aria-hidden="true">›</span></a>`;
+async function settings(sub) {
+  await Cloud.ready?.(); // 古い cloud.js と混ざっても止まらないように
+  if (sub && SETTINGS_PAGES[sub]) return settingsPage(sub);
   const last = (await DB.get('meta', 'lastBackup'))?.value;
+  const cfg = Cloud.get();
+  const pushOn = Cloud.enabled() && (await DB.get('meta', 'push'))?.value;
+  view().innerHTML = `<h1 class="page-title">設定</h1>
+  <nav class="menu">
+    ${menuRow('#settings/family', '👨‍👩‍👧', '家族で共有', !Cloud.available() ? '準備中' : cfg ? `${esc(cfg.familyName)}・あなたは「${esc(cfg.memberName)}」` : 'まだつながっていません')}
+    ${menuRow('#settings/notify', '🔔', 'お知らせ', pushOn ? 'この端末で受け取っています' : '家族が作品をしまったら、通知でお知らせ')}
+    ${menuRow('#settings/children', '👧', 'こども', S.children.map(c => esc(c.name)).join('・') || 'まだ登録していません')}
+  </nav>
+  <nav class="menu">
+    ${menuRow('#settings/backup', '💾', 'バックアップ・作品集', last ? '前回の書き出し ' + new Date(last).toLocaleDateString('ja-JP') : 'まだ一度も書き出していません')}
+    ${isStandalone() ? '' : `<button type="button" class="menu-row" id="mInstall"><span class="menu-ic">📲</span><span class="menu-txt"><b>ホーム画面に追加</b><small>アイコンから、すぐ開けるように</small></span><span class="chev" aria-hidden="true">›</span></button>`}
+  </nav>
+  <nav class="menu">
+    ${menuRow('#help', '❓', '使い方', 'はじめての方・こまったときに')}
+    ${menuRow('#settings/about', 'ℹ️', 'このアプリについて', `バージョン ${APP_VERSION}`)}
+  </nav>`;
+  const mi = $('#mInstall');
+  if (mi) mi.onclick = installGuide;
+}
+const backLink = (href = '#settings', label = '設定') => `<a class="back" href="${href}">‹ ${label}</a>`;
+async function settingsPage(sub) {
+  const [ic, title] = SETTINGS_PAGES[sub];
+  const head = `${backLink()}<h1 class="page-title">${ic} ${title}</h1>`;
   const t = today();
-  view().innerHTML = `<h1 class="page-title">⚙️ 設定とバックアップ</h1>
-  <section class="panel" id="cloudPanel"></section>
-  ${installPanel()}
-  <section class="panel"><h2>👧 こども</h2>
-    ${S.children.map(c => `<div class="child-row"><span class="dot" style="background:${c.color}"></span><b>${esc(c.name)}</b><small>${esc(c.birth)}（いま ${ageLabel(c.birth, t)}・${gradeLabel(c.birth, t)}）</small><button class="btn small" data-edit="${c.id}">編集</button></div>`).join('')}
-    <button class="btn wide" id="addChild">＋ こどもを追加</button></section>
-  <section class="panel"><h2>💾 思い出を守る</h2>
-    <p>アプリがなくなっても、スマホを替えても思い出が残るように、<b>ふつうの写真フォルダ</b>の形でまるごと書き出せます。</p>
-    <p class="hint">前回の書き出し：${last ? new Date(last).toLocaleDateString('ja-JP') : 'まだありません'}${est ? `　／　使用容量 約${(est.usage / 1048576).toFixed(1)}MB` : ''}</p>
-    <button class="btn primary wide" id="exp">📦 まるごと書き出す（ZIP）</button>
-    <a class="btn wide" href="#book">📕 作品集をつくる（PDFで保存・印刷）</a>
-    <label class="btn wide">♻️ 書き出したZIPから復元<input type="file" accept=".zip,application/zip" id="imp" hidden></label>
-    <p class="hint">ZIPの中身：こどもごと・年度ごとのフォルダに分けた写真／ことば一覧（テキスト）／声の録音／復元用データ。パソコンでもそのまま開いて見られます。</p></section>
-  <section class="panel"><h2>ℹ️ このアプリについて</h2>
-    <p><b>キッズギャラリー</b>　<small>バージョン ${APP_VERSION}（${APP_VERSION_DATE}）</small></p>
+  if (sub === 'family') { view().innerHTML = head + '<div id="cloudPanel"></div>'; return cloudPanel(); }
+  if (sub === 'notify') { view().innerHTML = head + '<section class="panel" id="notifyPanel"></section>'; return notifyPanel(); }
+  if (sub === 'children') {
+    view().innerHTML = head + `<section class="panel">
+      ${S.children.length ? S.children.map(c => `<div class="child-row"><span class="dot" style="background:${c.color}"></span><span class="grow"><b>${esc(c.name)}</b><small>${esc(c.birth)}（いま ${ageLabel(c.birth, t)}・${gradeLabel(c.birth, t)}）</small></span><button class="btn small" data-edit="${c.id}">編集</button></div>`).join('') : '<p class="empty">まだ登録していません</p>'}
+      <button class="btn primary wide" id="addChild">＋ こどもを追加</button>
+      <p class="hint">誕生日を入れると、作品に「4歳3か月・年中」のような年齢と学年が自動で付きます。</p></section>`;
+    $$('[data-edit]').forEach(b => {
+      b.onclick = () => {
+        const c = childById(b.dataset.edit);
+        const used = S.items.some(i => i.childId === c.id);
+        openModal(`<h2>${esc(c.name)}を編集</h2>${childFormHTML(c)}<div class="row">${used ? '' : '<button class="btn danger small" id="cDel">このこどもを削除</button>'}<button class="btn small" id="cClose">閉じる</button></div>`);
+        bindChildForm(c, () => { closeModal(); settingsPage('children'); });
+        $('#cClose').onclick = closeModal;
+        const del = $('#cDel');
+        if (del) del.onclick = async () => { await DB.del('children', c.id); await loadAll(); closeModal(); settingsPage('children'); };
+      };
+    });
+    $('#addChild').onclick = () => {
+      openModal(`<h2>こどもを追加</h2>${childFormHTML()}<button class="btn small" id="cClose">閉じる</button>`);
+      bindChildForm(null, () => { closeModal(); settingsPage('children'); });
+      $('#cClose').onclick = closeModal;
+    };
+    return;
+  }
+  if (sub === 'backup') {
+    const est = await navigator.storage?.estimate?.().catch(() => null);
+    const last = (await DB.get('meta', 'lastBackup'))?.value;
+    view().innerHTML = head + `<section class="panel"><h2>💾 まるごと書き出し</h2>
+      <p>アプリがなくなっても、スマホを替えても思い出が残るように、<b>ふつうの写真フォルダ</b>の形でまるごと書き出せます。</p>
+      <p class="hint">前回の書き出し：${last ? new Date(last).toLocaleDateString('ja-JP') : 'まだありません'}${est ? `　／　使用容量 約${(est.usage / 1048576).toFixed(1)}MB` : ''}</p>
+      <button class="btn primary wide" id="exp">📦 まるごと書き出す（ZIP）</button>
+      <label class="btn wide">♻️ 書き出したZIPから復元<input type="file" accept=".zip,application/zip" id="imp" hidden></label>
+      <p class="hint">ZIPの中身：こどもごと・年度ごとのフォルダに分けた写真／ことば一覧（テキスト）／声の録音／復元用データ。パソコンでもそのまま開いて見られます。</p></section>
+    <section class="panel"><h2>📕 作品集（ART BOOK）</h2>
+      <p class="hint">作品を自動でレイアウトして、PDFで保存・印刷できます。</p>
+      <a class="btn wide" href="#book">📕 作品集をつくる</a></section>`;
+    $('#exp').onclick = exportZip;
+    $('#imp').onchange = e => { if (e.target.files[0]) importZip(e.target.files[0]); };
+    return;
+  }
+  // about
+  view().innerHTML = head + `<section class="panel about">
+    <div class="about-head"><img src="icon-192.png" alt="" width="56" height="56"><div><b>キッズギャラリー</b><small>バージョン ${APP_VERSION}（${APP_VERSION_DATE}）</small></div></div>
     <p class="hint">${Cloud.enabled()
       ? 'データは、この端末と、家族で共有しているクラウドの両方に保存されます。それでも、ときどき「まるごと書き出し」でバックアップしておくと安心です。'
-      : 'データはこの端末のブラウザの中だけに保存されます（サーバーには送られません）。ブラウザのデータを消すと思い出も消えるので、定期的に書き出してください。'}</p>
-    <h3>アプリを新しくしても、作品は消えません</h3>
+      : 'データはこの端末のブラウザの中だけに保存されます（サーバーには送られません）。ブラウザのデータを消すと思い出も消えるので、定期的に書き出してください。'}</p></section>
+  <section class="panel"><h3>アプリを新しくしても、作品は消えません</h3>
     <p class="hint">見た目の変更や、機能の追加・変更があっても、保存してある作品・ことば・こどもの記録はそのまま使えます。データはアプリ本体とは別の場所に保存されているためです。</p>
     <h3>消えてしまうのは、こんなとき</h3>
     <ul class="hint">
@@ -1066,7 +1142,7 @@ async function settings() {
       <li><b>Android・パソコン：</b>どちらから開いても同じデータです。</li>
       <li><b>iPhone・iPad：</b>Safariで開いたときと、ホーム画面のアイコンから開いたときで、データは<b>別々</b>です。ふだんはどちらか一方だけで使ってください。</li>
       <li>両方で見たいときは、どちらでも「家族共有」をつなぐと、同じ内容にそろいます。</li>
-      <li>同じ人の端末は、「家族で共有」の<b>「端末を追加」</b>のコードやQRで、招待をもらいなおさずに追加できます。</li>
+      <li>同じ人の端末は、「家族で共有」の<b>「別の端末を追加」</b>のコードやQRで、招待をもらいなおさずに追加できます。</li>
     </ul>
     <h3>家族共有のしくみ</h3>
     <ul class="hint">
@@ -1075,26 +1151,6 @@ async function settings() {
       <li>同じ作品を別々の端末で直したときは、<b>あとから直した方</b>が残ります。</li>
       <li>写真と声は、必要なときにクラウドから取り寄せます。</li>
     </ul></section>`;
-  cloudPanel();
-  bindInstall();
-  $$('[data-edit]').forEach(b => {
-    b.onclick = () => {
-      const c = childById(b.dataset.edit);
-      const used = S.items.some(i => i.childId === c.id);
-      openModal(`<h2>${esc(c.name)}を編集</h2>${childFormHTML(c)}<div class="row">${used ? '' : '<button class="btn danger small" id="cDel">このこどもを削除</button>'}<button class="btn small" id="cClose">閉じる</button></div>`);
-      bindChildForm(c, () => { closeModal(); settings(); });
-      $('#cClose').onclick = closeModal;
-      const del = $('#cDel');
-      if (del) del.onclick = async () => { await DB.del('children', c.id); await loadAll(); closeModal(); settings(); };
-    };
-  });
-  $('#addChild').onclick = () => {
-    openModal(`<h2>こどもを追加</h2>${childFormHTML()}<button class="btn small" id="cClose">閉じる</button>`);
-    bindChildForm(null, () => { closeModal(); settings(); });
-    $('#cClose').onclick = closeModal;
-  };
-  $('#exp').onclick = exportZip;
-  $('#imp').onchange = e => { if (e.target.files[0]) importZip(e.target.files[0]); };
 }
 
 const safe = s => String(s || '').replace(/[\\/:*?"<>|\r\n\t]/g, '_').trim().slice(0, 40);
@@ -1507,32 +1563,34 @@ function updateBadge() {
 }
 
 async function cloudPanel() {
+  await Cloud.ready?.(); // 古い cloud.js と混ざっても止まらないように
   const el = $('#cloudPanel');
   if (!el) return;
-  const head = '<h2>👨‍👩‍👧 家族で共有</h2>';
   if (!Cloud.available()) {
-    el.innerHTML = head + '<p class="hint">家族で共有するためのサーバーは、まだ準備中です。</p>';
+    el.innerHTML = '<section class="panel"><p class="hint">家族で共有するためのサーバーは、まだ準備中です。</p></section>';
     return;
   }
   const cfg = Cloud.get();
   if (!cfg) {
-    el.innerHTML = head + `<p>家族みんなのスマホで、同じギャラリーを見たり、作品を追加したりできます。写真は<b>あなた専用のクラウド</b>に預けられ、招待した家族だけが見られます。</p>
-      <button class="btn primary wide" id="cCreate">🏠 家族のギャラリーをつくる</button>
-      <button class="btn wide" id="cJoin">🔑 招待コードで参加する</button>
-      <button class="btn wide" id="cDevJoin">📱 別の端末で使っている人</button>
-      <p class="hint">家族の誰かがつくっていて、あなたははじめてのときは「招待コードで参加」。すでにあなたがほかの端末で使っているときは「別の端末で使っている人」を選ぶと、招待をもらいなおさずにつなげます。</p>`;
+    el.innerHTML = `<section class="panel"><p>家族みんなのスマホで、同じギャラリーを見たり、作品を追加したりできます。写真は<b>あなた専用のクラウド</b>に預けられ、招待した家族だけが見られます。</p></section>
+      <p class="section-label">あてはまるものを選んでください</p>
+      <div class="choice-list">
+        <button class="choice" id="cCreate"><span class="choice-ic">🏠</span><span><b>家族のギャラリーをつくる</b><small>家族で最初に使う人</small></span></button>
+        <button class="choice" id="cJoin"><span class="choice-ic">🔑</span><span><b>招待コードで参加する</b><small>家族から招待コードをもらった人</small></span></button>
+        <button class="choice" id="cDevJoin"><span class="choice-ic">📱</span><span><b>別の端末で使っている人</b><small>自分のスマホやPCで、もう使っている人（招待は要りません）</small></span></button>
+      </div>`;
     $('#cCreate').onclick = cloudCreateModal;
     $('#cJoin').onclick = cloudJoinModal;
     $('#cDevJoin').onclick = () => cloudDeviceJoinModal();
     return;
   }
-  el.innerHTML = head + `<p class="hint">読み込み中…</p>`;
+  el.innerHTML = `<section class="panel"><p class="hint">読み込み中…</p></section>`;
   let inf;
   try { inf = await Cloud.info(); }
   catch (e) {
     if (e.revoked) return cloudPanel();
-    el.innerHTML = head + `<p><b>${esc(cfg.familyName)}</b>　<span class="hint">あなた：${esc(cfg.memberName)}</span></p><p class="banner">⚠️ ${esc(e.message)}</p>
-      <button class="btn wide" id="cSync">🔄 もう一度つなぐ</button><button class="btn danger wide small" id="cLeave">この端末の共有をやめる</button>`;
+    el.innerHTML = `<section class="panel"><p><b>${esc(cfg.familyName)}</b>　<span class="hint">あなた：${esc(cfg.memberName)}</span></p><p class="banner">⚠️ ${esc(e.message)}</p>
+      <button class="btn wide" id="cSync">🔄 もう一度つなぐ</button><button class="btn danger wide small" id="cLeave">この端末の共有をやめる</button></section>`;
     $('#cSync').onclick = () => { Cloud.syncNow(); setTimeout(cloudPanel, 1200); };
     $('#cLeave').onclick = leaveCloud;
     return;
@@ -1541,36 +1599,176 @@ async function cloudPanel() {
   const owner = inf.me.role === 'owner';
   const pct = Math.min(100, Math.round(inf.usage.bytes / inf.usage.limit * 100));
   const st = CLOUD_STATE[Cloud.state.state] || CLOUD_STATE.idle;
-  el.innerHTML = head + `
-    <p><b>${esc(inf.family.name)}</b>　<span class="hint">あなた：${esc(inf.me.name)}${owner ? '（つくった人）' : ''}</span></p>
-    <p class="hint" id="cState">${st[0]} ${st[1]}${Cloud.state.last ? '　最後の同期 ' + new Date(Cloud.state.last).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : ''}</p>
-    <div class="members">${inf.members.map(m => `<div class="member"><span>${m.role === 'owner' ? '👑' : '👤'} ${esc(m.name)}${m.id === inf.me.id ? '（あなた）' : ''}</span>${owner && m.id !== inf.me.id && m.role !== 'owner' ? `<span class="row member-act">${inf.members.length > 1 ? `<button class="btn small" data-merge="${m.id}" data-name="${esc(m.name)}">同じ人をまとめる</button>` : ''}<button class="btn small danger" data-rm="${m.id}" data-name="${esc(m.name)}">外す</button></span>` : ''}</div>`).join('')}</div>
-    <button class="btn primary wide" id="cInvite">✉️ 家族を招待する</button>
-    <h3>📱 あなたの端末</h3>
-    <div class="members">${(inf.devices || []).map(d => `<div class="member"><span>${d.id === inf.me.deviceId ? '📍' : '📱'} ${esc(d.name)}${d.id === inf.me.deviceId ? '（この端末）' : ''}<br><small class="hint">最後に使った日：${new Date(d.last_seen).toLocaleDateString('ja-JP')}</small></span>${d.id !== inf.me.deviceId ? `<button class="btn small danger" data-rmdev="${d.id}" data-name="${esc(d.name)}">外す</button>` : ''}</div>`).join('')}</div>
-    <button class="btn wide" id="cDevAdd">📲 あなたの別の端末を追加する</button>
-    <p class="hint">スマホ・タブレット・パソコンなど、同じ人が使う端末を、招待をもらいなおさずに追加できます。</p>
-    <button class="btn wide" id="cSync">🔄 いま同期する</button>
-    <div class="usage"><div class="bar"><i style="width:${Math.max(pct, inf.usage.bytes ? 1 : 0)}%"></i></div>
-      <small>クラウドの使用量 ${fmtMB(inf.usage.bytes)} / ${fmtMB(inf.usage.limit)}（写真${inf.usage.files}ファイル）</small></div>
-    <button class="btn danger small" id="cLeave">この端末の共有をやめる</button>`;
+  const pushOn = (await DB.get('meta', 'push'))?.value;
+  const lastSync = Cloud.state.last ? '　最後の同期 ' + new Date(Cloud.state.last).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '';
+  el.innerHTML = `
+    <section class="panel family-card">
+      <div class="fam-head"><div class="grow"><small class="hint">家族</small><b class="fam-name">${esc(inf.family.name)}</b></div>${owner ? '<button class="btn small" id="cFamRename">✏️ 名前</button>' : ''}</div>
+      <p class="hint" id="cState">${st[0]} ${st[1]}${lastSync}</p>
+      <button class="btn small" id="cSync">🔄 いま同期する</button>
+    </section>
+    <section class="panel"><h2>👥 メンバー <span class="count">${inf.members.length}人</span></h2>
+      <div class="members">${inf.members.map(m => {
+        const me = m.id === inf.me.id;
+        const btn = me ? `<button class="btn small" data-rename-me="1">✏️ 名前を変える</button>`
+          : owner ? `<button class="btn small" data-member="${m.id}">編集</button>` : '';
+        return `<div class="member"><span>${m.role === 'owner' ? '👑' : '👤'} <b>${esc(m.name)}</b>${me ? '<small class="tag">あなた</small>' : ''}${m.role === 'owner' ? '<small class="tag soft">つくった人</small>' : ''}</span>${btn}</div>`;
+      }).join('')}</div>
+      <button class="btn primary wide" id="cInvite">✉️ 家族を招待する</button>
+      ${owner ? '<p class="hint">同じ人が2人いるときは、「編集」→「同じ人をまとめる」で1人にできます。</p>' : ''}
+    </section>
+    <section class="panel"><h2>📱 あなたの端末 <span class="count">${(inf.devices || []).length}台</span></h2>
+      <div class="members">${(inf.devices || []).map(d => `<div class="member"><span>${d.id === inf.me.deviceId ? '📍' : '📱'} <b>${esc(d.name)}</b>${d.id === inf.me.deviceId ? '<small class="tag">この端末</small>' : ''}<br><small class="hint">最後に使った日：${new Date(d.last_seen).toLocaleDateString('ja-JP')}</small></span><button class="btn small" data-device="${d.id}">編集</button></div>`).join('')}</div>
+      <button class="btn wide" id="cDevAdd">📲 別の端末を追加する</button>
+      <p class="hint">スマホ・タブレット・パソコンなど、同じ人が使う端末を、招待をもらいなおさずに追加できます。</p>
+    </section>
+    <a class="panel menu-row solo" href="#settings/notify"><span class="menu-ic">🔔</span><span class="menu-txt"><b>お知らせ</b><small>${pushOn ? 'この端末で受け取っています' : '家族が作品をしまったら、通知でお知らせ'}</small></span><span class="chev">›</span></a>
+    <section class="panel">
+      <div class="usage"><div class="bar"><i style="width:${Math.max(pct, inf.usage.bytes ? 1 : 0)}%"></i></div>
+        <small>クラウドの使用量 ${fmtMB(inf.usage.bytes)} / ${fmtMB(inf.usage.limit)}（写真${inf.usage.files}ファイル）</small></div>
+      ${owner ? '' : '<button class="btn wide" id="cClaim">👑 つくった人の端末をなくしたとき</button>'}
+      <button class="btn danger wide" id="cLeave">この端末の共有をやめる</button>
+    </section>`;
+  const reload = () => cloudPanel();
   $('#cInvite').onclick = cloudInviteModal;
   $('#cDevAdd').onclick = cloudDeviceInviteModal;
   $('#cSync').onclick = () => { Cloud.syncNow(); toast('同期しています…'); setTimeout(cloudPanel, 2000); };
   $('#cLeave').onclick = leaveCloud;
-  $$('[data-rmdev]').forEach(b => {
-    b.onclick = async () => {
-      if (!confirm(`「${b.dataset.name}」を外しますか？\n（その端末からは、新しい作品が見られなくなります。端末の中のデータは残ります）`)) return;
-      try { await Cloud.removeDevice(b.dataset.rmdev); toast('外しました'); cloudPanel(); } catch (e) { toast(e.message, 4000); }
-    };
-  });
-  $$('[data-merge]').forEach(b => { b.onclick = () => cloudMergeModal(b.dataset.merge, b.dataset.name, inf.members); });
-  $$('[data-rm]').forEach(b => {
-    b.onclick = async () => {
-      if (!confirm(`「${b.dataset.name}」さんを家族から外しますか？\n・その人の端末は、すべて使えなくなります\n・家族の作品は消えません\n（同じ人が2人いるだけのときは、「同じ人をまとめる」を使うと、端末をそのまま使えます）`)) return;
-      try { await Cloud.removeMember(b.dataset.rm); toast('外しました'); cloudPanel(); } catch (e) { toast(e.message, 4000); }
-    };
-  });
+  const cl = $('#cClaim');
+  if (cl) cl.onclick = claimOwnerModal;
+  const fr = $('#cFamRename');
+  if (fr) fr.onclick = () => nameModal('家族の名前を変える', inf.family.name, 'みんなの画面に表示されます。', async n => { await Cloud.renameFamily(n); }, reload);
+  const rm = $('[data-rename-me]');
+  if (rm) rm.onclick = () => nameModal('あなたの名前を変える', inf.me.name, '家族の一覧や、お知らせ（「◯◯が しまいました」）に出る名前です。', async n => { await Cloud.renameMember(inf.me.id, n); }, reload);
+  $$('[data-member]').forEach(b => { b.onclick = () => memberModal(inf.members.find(m => m.id === b.dataset.member), inf); });
+  $$('[data-device]').forEach(b => { b.onclick = () => deviceModal(inf.devices.find(d => d.id === b.dataset.device), inf); });
+}
+
+// 名前を入れる小さな画面（家族・自分・ほかの人・端末の名前の変更で共通）
+function nameModal(title, current, hint, save, done) {
+  const m = openModal(`<h2>✏️ ${esc(title)}</h2>
+    <form id="nForm" class="form">
+      <label>新しい名前<input name="name" required maxlength="40" value="${esc(current)}" autocomplete="off"></label>
+      ${hint ? `<p class="hint">${hint}</p>` : ''}
+      <div class="row"><button class="btn primary">保存</button><button type="button" class="btn" id="nX">やめる</button></div></form>`);
+  const inp = $('[name=name]', m);
+  inp.focus(); inp.select();
+  $('#nX', m).onclick = closeModal;
+  $('#nForm', m).onsubmit = async e => {
+    e.preventDefault();
+    const name = inp.value.trim(), btn = e.submitter;
+    if (!name) return;
+    btn.disabled = true;
+    try { await save(name); closeModal(); toast('名前を変えました'); done?.(); }
+    catch (err) { toast(err.message, 4000); btn.disabled = false; }
+  };
+}
+
+// つくった人が、ほかのメンバーを編集する（名前・まとめる・外す）
+function memberModal(mb, inf) {
+  if (!mb) return;
+  const others = inf.members.filter(x => x.id !== mb.id);
+  const m = openModal(`<h2>👤 ${esc(mb.name)}</h2>
+    <div class="action-list">
+      <button class="choice" id="mmRename"><span class="choice-ic">✏️</span><span><b>名前を変える</b><small>一覧やお知らせに出る名前</small></span></button>
+      ${mb.role !== 'owner' && others.length ? '<button class="choice" id="mmMerge"><span class="choice-ic">👥</span><span><b>同じ人をまとめる</b><small>同じ人が2人いるとき、1人にします（端末はそのまま使えます）</small></span></button>' : ''}
+      ${mb.role !== 'owner' ? '<button class="choice danger" id="mmRemove"><span class="choice-ic">🚪</span><span><b>家族から外す</b><small>その人の端末は、すべて使えなくなります</small></span></button>' : ''}
+    </div>
+    <button class="btn wide" id="mmX">閉じる</button>`);
+  $('#mmX', m).onclick = closeModal;
+  $('#mmRename', m).onclick = () => nameModal(`${mb.name}の名前を変える`, mb.name, '', async n => { await Cloud.renameMember(mb.id, n); }, cloudPanel);
+  const mg = $('#mmMerge', m);
+  if (mg) mg.onclick = () => cloudMergeModal(mb.id, mb.name, inf.members);
+  const rv = $('#mmRemove', m);
+  if (rv) rv.onclick = async () => {
+    if (!confirm(`「${mb.name}」を家族から外しますか？\n・その人の端末は、すべて使えなくなります\n・家族の作品は消えません\n（同じ人が2人いるだけのときは、「同じ人をまとめる」を使うと、端末をそのまま使えます）`)) return;
+    try { await Cloud.removeMember(mb.id); closeModal(); toast('外しました'); cloudPanel(); } catch (e) { toast(e.message, 4000); }
+  };
+}
+
+// 自分の端末を編集する（名前・外す）
+function deviceModal(d, inf) {
+  if (!d) return;
+  const here = d.id === inf.me.deviceId;
+  const m = openModal(`<h2>${here ? '📍' : '📱'} ${esc(d.name)}</h2>
+    <div class="action-list">
+      <button class="choice" id="dmRename"><span class="choice-ic">✏️</span><span><b>名前を変える</b><small>「パパのiPhone」など、見分けやすい名前に</small></span></button>
+      ${here ? '' : '<button class="choice danger" id="dmRemove"><span class="choice-ic">🚪</span><span><b>この端末を外す</b><small>なくした・使わなくなった端末を止めます（端末の中のデータは残ります）</small></span></button>'}
+    </div>
+    ${here ? '<p class="hint">この端末を止めるときは、画面の下の「この端末の共有をやめる」を使います。</p>' : ''}
+    <button class="btn wide" id="dmX">閉じる</button>`);
+  $('#dmX', m).onclick = closeModal;
+  $('#dmRename', m).onclick = () => nameModal('端末の名前を変える', d.name, '', async n => { await Cloud.renameDevice(d.id, n); }, cloudPanel);
+  const rv = $('#dmRemove', m);
+  if (rv) rv.onclick = async () => {
+    if (!confirm(`「${d.name}」を外しますか？\n（その端末からは、新しい作品が見られなくなります。端末の中のデータは残ります）`)) return;
+    try { await Cloud.removeDevice(d.id); closeModal(); toast('外しました'); cloudPanel(); } catch (e) { toast(e.message, 4000); }
+  };
+}
+
+// 「つくった人」を引き継ぐ（つくった人の端末をなくしたときなど）
+function claimOwnerModal() {
+  const m = openModal(`<h2>👑 つくった人を引き継ぐ</h2>
+    <p>「つくった人」の端末をなくしたときなどに、<b>あなたを「つくった人」</b>にします。つくった人は、メンバーの名前の変更・まとめる・外す、ができます。</p>
+    <form id="oForm" class="form">
+      <label>設定キー<input name="key" type="password" required autocomplete="off" placeholder="家族のギャラリーをつくったときに入れたキー"></label>
+      <div class="banner"><ul class="steps">
+        <li>前のつくった人は「参加した人」になります（家族からは外れません）。</li>
+        <li>家族の作品は、消えません。</li>
+      </ul></div>
+      <div class="row"><button class="btn primary">引き継ぐ</button><button type="button" class="btn" id="oX">やめる</button></div></form>`);
+  $('#oX', m).onclick = closeModal;
+  $('#oForm', m).onsubmit = async e => {
+    e.preventDefault();
+    const btn = e.submitter;
+    btn.disabled = true;
+    try { await Cloud.claimOwner(new FormData(e.target).get('key').trim()); closeModal(); toast('あなたが「つくった人」になりました'); cloudPanel(); }
+    catch (err) { toast(err.message, 4000); btn.disabled = false; }
+  };
+}
+
+// ---------- お知らせ（プッシュ通知） ----------
+async function notifyPanel() {
+  await Cloud.ready?.(); // 古い cloud.js と混ざっても止まらないように
+  const el = $('#notifyPanel');
+  if (!el) return;
+  const intro = '<p>家族のだれかが作品やことばをしまったとき、<b>この端末にお知らせ</b>が届きます。<br><span class="hint">自分でしまったときは届きません。端末ごとに設定します。</span></p>';
+  if (!Cloud.enabled()) {
+    el.innerHTML = intro + '<p class="banner">お知らせは「家族で共有」につなぐと使えます。</p><a class="btn primary wide" href="#settings/family">👨‍👩‍👧 家族で共有へ</a>';
+    return;
+  }
+  if (!Cloud.pushSupported()) {
+    el.innerHTML = intro + (isIOS && !isStandalone()
+      ? '<p class="banner">iPhone・iPadでは、<b>ホーム画面のアイコンから開いたとき</b>に使えます（iOS 16.4以降）。</p><button class="btn primary wide" id="nGuide">📲 ホーム画面に追加のしかた</button>'
+      : '<p class="banner">この端末・ブラウザは、お知らせに対応していません。</p>');
+    const g = $('#nGuide');
+    if (g) g.onclick = installGuide;
+    return;
+  }
+  const sub = await Cloud.pushSubscription().catch(() => null);
+  const on = !!sub && !!(await DB.get('meta', 'push'))?.value;
+  const denied = Notification.permission === 'denied';
+  const howAllow = isIOS ? 'iPhoneの「設定」→「通知」→「キッズギャラリー」で「通知を許可」をオンにします。'
+    : isAndroid ? 'ホーム画面のアイコンを長押し →「アプリ情報」→「通知」をオンにします。'
+    : 'アドレスバー左の鍵（またはサイト情報）マーク →「通知」を「許可」にします。';
+  el.innerHTML = intro + (on
+    ? '<div class="state on">✅ この端末で受け取っています</div><button class="btn wide" id="nTest">🔔 テストのお知らせを出す</button><button class="btn wide" id="nOff">お知らせを止める</button>'
+    : denied
+      ? `<div class="state off">🔕 お知らせがブロックされています</div><p class="hint">${howAllow}<br>許可したら、この画面を開きなおしてください。</p>`
+      : '<div class="state off">🔕 いまは受け取っていません</div><button class="btn primary wide" id="nOn">🔔 お知らせを受け取る</button><p class="hint">押すと「通知を許可しますか？」と聞かれるので、「許可」を選んでください。</p>');
+  const onB = $('#nOn'), offB = $('#nOff'), testB = $('#nTest');
+  if (onB) onB.onclick = async () => {
+    onB.disabled = true;
+    try { await Cloud.pushOn(); toast('お知らせを受け取るようにしました'); } catch (e) { toast(e.message, 5000); }
+    notifyPanel();
+  };
+  if (offB) offB.onclick = async () => { await Cloud.pushOff(); toast('お知らせを止めました'); notifyPanel(); };
+  if (testB) testB.onclick = async () => {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.showNotification('キッズギャラリー', { body: 'これはテストのお知らせです。家族が作品をしまうと、このように届きます。', icon: 'icon-192.png', tag: 'kg-test' });
+    } catch (e) { toast('テストを出せませんでした：' + e.message, 4000); }
+  };
 }
 
 // 同じ人が2人いるとき：1人にまとめる（まとめる側の端末は、まとめ先の端末になる）
@@ -1606,7 +1804,7 @@ async function leaveCloud() {
   if (!confirm('この端末の家族共有をやめますか？\n・この端末のデータは残ります\n・クラウドのデータも残り、ほかの家族は使い続けられます\n・あなたのほかの端末が1台もないときは、戻るのに新しい招待が必要です')) return;
   await Cloud.leave();
   toast('共有をやめました');
-  settings();
+  router({ keep: true });
 }
 
 function cloudCreateModal() {
@@ -1624,7 +1822,7 @@ function cloudCreateModal() {
     btn.disabled = true;
     try {
       await Cloud.create(f.get('key').trim(), f.get('family').trim(), f.get('me').trim(), deviceLabel());
-      closeModal(); toast('家族のギャラリーをつくりました'); cloudPanel(); updateBadge();
+      closeModal(); toast('家族のギャラリーをつくりました'); cloudPanel(); updateBadge(); afterConnect();
     } catch (err) { toast(err.message, 4000); btn.disabled = false; }
   };
 }
@@ -1643,7 +1841,7 @@ function cloudJoinModal() {
     btn.disabled = true;
     try {
       await Cloud.join(f.get('code').trim(), f.get('me').trim(), deviceLabel());
-      closeModal(); toast('家族のギャラリーに参加しました'); cloudPanel(); updateBadge();
+      closeModal(); toast('家族のギャラリーに参加しました'); cloudPanel(); updateBadge(); afterConnect();
     } catch (err) { toast(err.message, 4000); btn.disabled = false; }
   };
 }
@@ -1653,7 +1851,7 @@ async function cloudInviteModal() {
   try { r = await Cloud.invite(); } catch (e) { return toast(e.message, 4000); }
   const code = r.code.slice(0, 4) + '-' + r.code.slice(4);
   const url = location.href.split('#')[0];
-  const text = `キッズギャラリーに招待します。\n\n① アプリを開く：${url}\n② ⚙️ →「家族で共有」→「招待コードで参加する」\n③ 招待コード：${code}\n\n（コードは3日間・1回だけ使えます）`;
+  const text = `キッズギャラリーに招待します。\n\n① アプリを開く：${url}\n② 右上の ⚙️ →「家族で共有」→「招待コードで参加する」\n③ 招待コード：${code}\n\n（コードは3日間・1回だけ使えます）`;
   const m = openModal(`<h2>✉️ 家族を招待</h2>
     <p>招待コード</p><div class="invite-code">${code}</div>
     <p class="hint">3日間、1人だけが使えます。別の家族を招待するときは、もう一度つくってください。</p>
@@ -1682,7 +1880,7 @@ async function cloudDeviceInviteModal() {
   const url = location.href.split('#')[0];
   const link = `${url}#adddevice/${r.code}`;
   const until = new Date(r.expires).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
-  const text = `キッズギャラリーに、あなたの別の端末を追加します。\n\n① 追加したい端末で、このリンクを開く：\n${link}\n\n（開けないときは、アプリを開いて ⚙️ →「家族で共有」→「別の端末で使っている人」に、コード ${code} を入れます）\n\n※コードは${until}まで・1回だけ使えます`;
+  const text = `キッズギャラリーに、あなたの別の端末を追加します。\n\n① 追加したい端末で、このリンクを開く：\n${link}\n\n（開けないときは、アプリを開いて 右上の ⚙️ →「家族で共有」→「別の端末で使っている人」に、コード ${code} を入れます）\n\n※コードは${until}まで・1回だけ使えます`;
   const m = openModal(`<h2>📲 あなたの別の端末を追加</h2>
     <p>追加したい端末で、アプリを開き、「家族で共有」→「別の端末で使っている人」にこのコードを入れてください。QRコードを読み取っても開けます。</p>
     <div class="invite-code">${code}</div>
@@ -1704,12 +1902,12 @@ function cloudDeviceJoinModal(prefill = '') {
   const m = openModal(`<h2>📱 別の端末で使っている人</h2>
     <form id="cForm" class="form">
       ${iosWarn}
-      <p class="hint">すでに使っている端末で、「家族で共有」→「あなたの別の端末を追加する」を押すと、コードが出ます。</p>
+      <p class="hint">すでに使っている端末で、「家族で共有」→「別の端末を追加する」を押すと、コードが出ます。</p>
       <label>端末追加コード（8文字）<input name="code" required maxlength="9" autocapitalize="characters" autocomplete="off" value="${esc(prefill)}" placeholder="例：ABCD-EFGH" style="text-transform:uppercase;letter-spacing:.15em"></label>
       <label>この端末の名前<input name="dev" required maxlength="40" value="${esc(deviceLabel())}"></label>
       <p class="hint">この端末にすでにある作品も、家族のギャラリーに加わります。</p>
       <div class="row"><button class="btn primary">つなぐ</button><button type="button" class="btn" id="cX">やめる</button></div></form>`);
-  $('#cX', m).onclick = () => { closeModal(); if (location.hash.startsWith('#adddevice')) go('#settings'); };
+  $('#cX', m).onclick = () => { closeModal(); if (location.hash.startsWith('#adddevice')) go('#settings/family'); };
   const g = $('#dGuide', m);
   if (g) g.onclick = installGuide;
   $('#cForm', m).onsubmit = async e => {
@@ -1718,13 +1916,13 @@ function cloudDeviceJoinModal(prefill = '') {
     btn.disabled = true;
     try {
       await Cloud.joinDevice(f.get('code').trim(), f.get('dev').trim());
-      toast('この端末をつなぎました'); updateBadge(); go('#settings');
+      toast('この端末をつなぎました'); updateBadge(); go('#settings/family'); afterConnect();
     } catch (err) { toast(err.message, 4000); btn.disabled = false; }
   };
 }
 // QRやリンクから開いたとき：設定の画面を開いて、コード入りで「端末を追加」を出す
 async function adddevice(code = '') {
-  await settings();
+  await settings('family');
   if (!Cloud.available()) return;
   if (Cloud.enabled()) return toast('この端末は、すでに家族につながっています', 4000);
   cloudDeviceJoinModal(code.replace(/[^A-Za-z0-9]/g, '').toUpperCase().replace(/^(.{4})(.+)$/, '$1-$2'));
@@ -1736,22 +1934,132 @@ Cloud.hooks.refresh = async gone => {
   await gcBlobs(gone, S.items);
   const modalOpen = $('#modal').classList.contains('open');
   const [name, ...args] = (location.hash.slice(1) || 'home').split('/');
-  const readOnlyView = ['home', 'gallery', 'boxes', 'box', 'item', 'settings'].includes(name) || (name === 'words' && !args.length);
+  const readOnlyView = ['home', 'gallery', 'boxes', 'box', 'item', 'help'].includes(name) || (name === 'settings' && !args.length) || (name === 'words' && !args.length);
   if (!modalOpen && readOnlyView) { await router({ keep: true }); toast('家族の更新が届きました'); }
   else toast('家族の更新が届きました（画面を開きなおすと反映されます）', 4000);
 };
-Cloud.hooks.revoked = () => { toast('この端末は家族の共有から外されました（データは残っています）', 5000); updateBadge(); if (location.hash === '#settings') settings(); };
+Cloud.hooks.revoked = () => { toast('この端末は家族の共有から外されました（データは残っています）', 5000); updateBadge(); if (location.hash.startsWith('#settings')) router({ keep: true }); };
 Cloud.on(() => {
   updateBadge();
   const s = $('#cState');
   if (s) { const st = CLOUD_STATE[Cloud.state.state] || CLOUD_STATE.idle; s.textContent = `${st[0]} ${st[1]}${Cloud.state.state === 'error' || Cloud.state.state === 'offline' ? '：' + Cloud.state.msg : ''}`; }
 });
 
+// ---------- お知らせの案内（ホーム） ----------
+const NUDGE_KEY = 'kg.notifyNudge';
+// 家族につながっていて、まだ「受け取る／受け取らない」を決めていない端末にだけ出す
+async function notifyNudge() {
+  await Cloud.ready?.(); // 古い cloud.js と混ざっても止まらないように
+  if (!Cloud.enabled() || !Cloud.pushSupported() || Notification.permission === 'denied') return '';
+  if ((await DB.get('meta', 'push')) !== undefined) return '';
+  try { if (Date.now() - Number(localStorage.getItem(NUDGE_KEY) || 0) < 14 * 864e5) return ''; } catch { }
+  return `<div class="banner nudge" id="nudge"><span>🔔 家族が作品をしまったら、お知らせで受け取りませんか？</span>
+    <span class="row"><button class="btn small primary" id="nudgeOn">受け取る</button><button class="btn small" id="nudgeLater">あとで</button></span></div>`;
+}
+function bindNotifyNudge() {
+  const on = $('#nudgeOn'), later = $('#nudgeLater');
+  if (on) on.onclick = async () => {
+    on.disabled = true;
+    try { await Cloud.pushOn(); toast('お知らせを受け取るようにしました'); $('#nudge').hidden = true; }
+    catch (e) { toast(e.message, 5000); on.disabled = false; }
+  };
+  if (later) later.onclick = () => { try { localStorage.setItem(NUDGE_KEY, String(Date.now())); } catch { } $('#nudge').hidden = true; };
+}
+// 家族につないだ直後：お知らせを受け取るか聞く（対応している端末だけ）
+function afterConnect() {
+  if (!Cloud.pushSupported() || Notification.permission === 'denied') return;
+  setTimeout(() => {
+    const m = openModal(`<div class="center"><div class="big-ic">🔔</div><h2>お知らせを受け取りますか？</h2>
+      <p>家族が作品やことばをしまったとき、この端末に通知が届きます。</p></div>
+      <button class="btn primary wide" id="acOn">受け取る</button><button class="btn wide" id="acLater">あとで（設定からいつでも変えられます）</button>`);
+    $('#acLater', m).onclick = closeModal;
+    $('#acOn', m).onclick = async () => {
+      try { await Cloud.pushOn(); toast('お知らせを受け取るようにしました'); } catch (e) { toast(e.message, 5000); }
+      closeModal();
+      if (location.hash.startsWith('#settings')) router({ keep: true });
+    };
+  }, 700);
+}
+
+// ---------- はじめての案内（ツアー） ----------
+const TOUR = [
+  { ic: '🖼️', t: 'キッズギャラリーへようこそ', d: '子どもの作品・ことば・プレゼントを、写真に撮って<b>「しまって」</b>おくアプリです。現物を減らしても、思い出は残せます。' },
+  { ic: '＋', t: '下の「＋」で しまう', d: '種類（平面・立体・文字など）を選んで、撮るだけ。<b>年齢と学年は自動</b>で付きます。たくさんあるときは「連続撮影」が便利です。' },
+  { ic: '📦', t: '現物は、どうする？', d: '<b>手元に保管</b>・<b>実家へ送る</b>・<b>「ありがとう、さようなら」で手放す</b>から選べます。保管箱にはQRラベルを貼れます。' },
+  { ic: '👨‍👩‍👧', t: '家族で共有・お知らせ', d: '招待コードで家族とつながると、同じギャラリーを見られます。家族が作品をしまうと、<b>お知らせ</b>で届きます。' },
+  { ic: '💾', t: '思い出を守る', d: 'ときどき<b>「まるごと書き出し」</b>をすると安心です。作品集（PDF）もつくれます。迷ったら、右上の<b>「？」</b>から使い方を見られます。' },
+];
+function tour(k = 0) {
+  if ($('#modal').classList.contains('open') && !$('#modal').classList.contains('tour')) return;
+  const s = TOUR[k], last = k === TOUR.length - 1;
+  // 2枚目からは中身だけ入れかえる（せり出す動きをくり返さない）
+  const box = $('#modal.open.tour .modal-card');
+  const show = html => (box ? (box.innerHTML = html, box) : openModal(html, 'tour'));
+  const m = show(`<div class="tour-slide">
+      <div class="tour-ic">${s.ic}</div>
+      <h2>${s.t}</h2>
+      <p>${s.d}</p>
+      <div class="dots">${TOUR.map((_, n) => `<i class="${n === k ? 'on' : ''}"></i>`).join('')}</div>
+    </div>
+    <div class="tour-nav">${k ? '<button class="btn" id="tPrev">もどる</button>' : '<button class="btn ghost" id="tSkip">スキップ</button>'}<button class="btn primary" id="tNext">${last ? 'はじめる' : 'つぎへ'}</button></div>`);
+  const done = async () => { await DB.putRaw('meta', { id: 'tourDone', value: Date.now() }); closeModal(); };
+  $('#tNext', m).onclick = () => (last ? done() : tour(k + 1));
+  const prev = $('#tPrev', m), skip = $('#tSkip', m);
+  if (prev) prev.onclick = () => tour(k - 1);
+  if (skip) skip.onclick = done;
+}
+
+// ---------- 使い方 ----------
+const HELP = [
+  ['はじめに', [
+    ['このアプリでできること', '子どもの作品（平面・立体・文字・プチ記念）、プレゼント、ことばを、写真や文字で「しまって」おけます。年齢・学年は自動で付き、家族と共有したり、作品集にしたりできます。'],
+    ['ホーム画面に追加する', 'アイコンをホーム画面に置くと、アプリのようにすぐ開けます。<br>⚙️ 設定 →「ホーム画面に追加」で、あなたの端末に合った手順が出ます。<br><b>iPhone：</b>Safariの共有ボタン（□に↑）→「ホーム画面に追加」。'],
+    ['こどもを登録・編集する', '⚙️ 設定 →「こども」。誕生日を入れると、作品に年齢と学年が自動で付きます。'],
+  ]],
+  ['しまう', [
+    ['作品をしまう', '① 下の<b>「＋」</b>を押す ② 種類を選ぶ ③「撮る」か「選ぶ」で写真を入れる ④ だれの・いつ・題名を入れて、現物をどうするか選ぶ。'],
+    ['たくさんあるとき（連続撮影）', '「＋」→「たくさんある時は連続撮影」。作品を置いて手をどけると、自動で撮れます。最後にまとめて整理できます。'],
+    ['写真のゆがみ・明るさ', '撮ると自動で四隅を見つけて、まっすぐ・白く整えます。うまくいかないときは、四隅の点を指で動かしたり、回転・明るさを調整できます。'],
+    ['ことばを残す', '下の「ことば」→「＋ ことばを残す」。音声入力や、本人の声の録音もできます。言い間違いにチェックすると「言い間違い辞典」に並びます。'],
+  ]],
+  ['見る・整理する', [
+    ['ギャラリーで探す', '下の「ギャラリー」。種類や「現物：手元・実家・手放した」で絞りこめます。年度ごとに並びます。'],
+    ['現物の保管とQRラベル', '下の「保管」で箱を作り、作品の画面で箱を選びます。「QRラベルを印刷」で箱に貼ると、スマホで読み取って中身を見られます。'],
+    ['「ありがとう、さようなら」', '現物を手放すときの小さな儀式です。写真は残り、手放した日と「ありがとう」の声を記録できます。'],
+  ]],
+  ['家族で共有', [
+    ['家族とつながる', '⚙️ 設定 →「家族で共有」。最初の1人が「家族のギャラリーをつくる」、ほかの人は「招待コードで参加する」。招待コードは「家族を招待する」で作れます（3日間・1回だけ）。'],
+    ['自分の別の端末を追加する', 'すでに使っている端末で「家族で共有」→「別の端末を追加する」。出てきたコード（30分・1回だけ）を、新しい端末の「別の端末で使っている人」に入れます。<b>招待をもらいなおす必要はありません。</b>'],
+    ['名前を変える', '「家族で共有」の自分の行の「名前を変える」。つくった人は、ほかの人の「編集」→「名前を変える」でも変えられます。端末の名前も「編集」で変えられます。'],
+    ['同じ人が2人いるとき', 'つくった人が、消したい方の「編集」→「同じ人をまとめる」→ 残す名前を選びます。その人の端末は、そのまま使えます。元に戻せないので、同じ人か確かめてから。'],
+    ['つくった人の端末をなくしたとき', '「家族で共有」のいちばん下「つくった人の端末をなくしたとき」から、設定キーを入れると、あなたが「つくった人」になります。'],
+  ]],
+  ['お知らせ', [
+    ['お知らせを受け取る', '⚙️ 設定 →「お知らせ」→「お知らせを受け取る」→「許可」。家族が作品をしまうと、この端末に通知が届きます（自分でしまったときは届きません）。'],
+    ['iPhone・iPadでのお知らせ', 'ホーム画面のアイコンから開いたときだけ使えます（iOS 16.4以降）。先に「ホーム画面に追加」してから、アイコンで開いて設定してください。'],
+    ['お知らせが来ない', '① 設定の「お知らせ」が「受け取っています」か ② 端末の設定で、このアプリの通知が許可されているか ③「テストのお知らせを出す」で表示されるか、を確かめてください。'],
+  ]],
+  ['思い出を守る・こまったとき', [
+    ['バックアップ（まるごと書き出し）', '⚙️ 設定 →「バックアップ・作品集」→「まるごと書き出す」。こどもごと・年度ごとの写真フォルダのZIPになります。同じ画面の「ZIPから復元」で戻せます。'],
+    ['作品集をつくる', 'ホームの「作品集をつくる」。表紙や章を自動でレイアウトし、PDFで保存・印刷できます。'],
+    ['iPhoneで、Safariとアイコンの中身がちがう', 'iPhone・iPadでは、Safariとホーム画面のアイコンで保存場所が別々です。両方で「家族で共有」につなぐと、同じ内容にそろいます。'],
+    ['新しい画面にならない', 'アプリを閉じて開きなおしてください（ホーム画面のアイコンの場合は2回）。'],
+  ]],
+];
+function help() {
+  view().innerHTML = `<h1 class="page-title">❓ 使い方</h1>
+  <button class="btn wide" id="hTour">▶️ はじめての案内をもう一度見る</button>
+  ${HELP.map(([sec, qs]) => `<p class="section-label">${sec}</p><div class="help-list">${qs.map(([q, a]) => `<details class="help"><summary>${q}</summary><div class="help-a">${a}</div></details>`).join('')}</div>`).join('')}
+  <p class="hint center">バージョン ${APP_VERSION}</p>`;
+  $('#hTour').onclick = () => tour(0);
+}
+
 // ---------- ルーター ----------
-const routes = { home, gallery, item, add, edit, burst, ritual, words, boxes, box, labels, settings, book, goods, adddevice };
+const routes = { home, gallery, item, add, edit, burst, ritual, words, boxes, box, labels, settings, book, goods, adddevice, help };
 const TAB_OF = { item: 'gallery', edit: 'gallery', burst: 'add', ritual: 'gallery', box: 'boxes', labels: 'boxes', goods: 'gallery', book: 'gallery' };
 async function router(opts) {
   const keep = opts?.keep === true ? window.scrollY : 0;
+  if (!opts?.keep) NAV.count++;
   stopCamera();
   $('#pageStyle')?.remove(); // 作品集用の用紙サイズ指定は、作品集の画面だけで有効にする
   closeModal();
@@ -1772,7 +2080,11 @@ window.addEventListener('hashchange', () => router());
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('sw.js').catch(() => { });
   }
+  // お知らせを押してアプリが開いたとき：その作品を見せる
+  navigator.serviceWorker?.addEventListener('message', e => { if (e.data?.go) location.hash = e.data.go; });
   router();
+  // はじめて開いたときだけ、使い方の案内を出す（QRやお知らせから開いたときは邪魔しない）
+  if (!(await DB.get('meta', 'tourDone')) && ['', '#home'].includes(location.hash)) setTimeout(tour, 400);
   Cloud.init().then(() => {
     updateBadge();
     // 最初の画面（お子さんの登録）は、家族につながっているかどうかで中身が変わるので、つながりを読んだあとに描きなおす

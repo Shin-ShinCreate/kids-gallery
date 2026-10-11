@@ -43,7 +43,14 @@ const Cloud = (() => {
 
   const save = () => DB.putRaw('meta', { id: 'cloud', ...cfg });
 
+  // 起動時に、端末の中の接続情報を読み終わったことを知らせる（読み終わる前に画面を描くと「つながっていない」と出てしまうため）
+  let readyDone;
+  const readyP = new Promise(r => { readyDone = r; });
+  const ready = () => readyP;
   async function init() {
+    try { await start(); } finally { readyDone(); }
+  }
+  async function start() {
     if (!available()) return;
     cfg = (await DB.get('meta', 'cloud')) || null;
     if (!cfg) return;
@@ -55,6 +62,7 @@ const Cloud = (() => {
       window.addEventListener('online', () => schedule(300));
     }
     schedule(300);
+    pushRefresh().catch(() => { });
   }
 
   async function markAllDirty() {
@@ -89,6 +97,7 @@ const Cloud = (() => {
     DB.onChange = null;
     await DB.delRaw('meta', 'cloud');
     await DB.clearRaw('outbox');
+    await DB.putRaw('meta', { id: 'push', value: false });
     setState('off');
     if (revoked) hooks.revoked();
   }
@@ -100,6 +109,53 @@ const Cloud = (() => {
   const removeDevice = id => request('/api/devices/' + id, { method: 'DELETE' });
   // 同じ人が2人いるとき、fromId の人を intoId の人にまとめる（端末は引き継がれる）
   const mergeMember = (fromId, intoId) => request('/api/members/' + fromId + '/merge', { method: 'POST', body: { into: intoId } });
+  // 名前の変更（自分の名前・ほかの人の名前［つくった人のみ］・自分の端末・家族）
+  const renameMember = (id, name) => json('/api/members/' + id + '/rename', { method: 'POST', body: { name } });
+  const renameDevice = (id, name) => json('/api/devices/' + id + '/rename', { method: 'POST', body: { name } });
+  const renameFamily = async name => {
+    const r = await json('/api/family/rename', { method: 'POST', body: { name } });
+    if (cfg) { cfg.familyName = r.name; await save(); }
+    return r;
+  };
+  // 「つくった人」を引き継ぐ（設定キーが必要）
+  const claimOwner = setupKey => json('/api/claim-owner', { method: 'POST', body: { setupKey } });
+
+  // ---------- プッシュ通知（家族が作品を追加したときのお知らせ） ----------
+  const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  const keyBytes = b64 => Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((b64.length + 3) % 4)), c => c.charCodeAt(0));
+  async function pushSubscription() {
+    if (!pushSupported()) return null;
+    const reg = await navigator.serviceWorker.getRegistration();
+    return reg ? reg.pushManager.getSubscription() : null;
+  }
+  // この端末で、お知らせを受け取る（許可を求める画面が出る）
+  async function pushOn() {
+    if (!pushSupported()) throw new Error('この端末・ブラウザは、お知らせに対応していません');
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') throw new Error(perm === 'denied' ? 'お知らせがブロックされています。端末の設定で「通知」を許可してください' : 'お知らせが許可されませんでした');
+    const { publicKey } = await json('/api/push/key', { auth: false });
+    if (!publicKey) throw new Error('サーバーの準備がまだです');
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) });
+    await json('/api/push/subscribe', { method: 'POST', body: sub.toJSON() });
+    await DB.putRaw('meta', { id: 'push', value: true });
+  }
+  async function pushOff() {
+    const sub = await pushSubscription();
+    if (sub) {
+      try { await json('/api/push/unsubscribe', { method: 'POST', body: { endpoint: sub.endpoint } }); } catch { }
+      await sub.unsubscribe().catch(() => { });
+    }
+    await DB.putRaw('meta', { id: 'push', value: false });
+  }
+  // 「受け取る」にしている端末は、開いたときに登録をサーバーへ送りなおす（まとめた・引き継いだあとも届くように）
+  async function pushRefresh() {
+    if (!(await DB.get('meta', 'push'))?.value) return;
+    const sub = await pushSubscription();
+    if (sub) await json('/api/push/subscribe', { method: 'POST', body: sub.toJSON() }).catch(() => { });
+  }
+
   // サーバーが教えてくれた「自分」の情報と、この端末に覚えている情報がずれていたら直す（まとめられたあとなど）
   async function syncMe(me) {
     if (!cfg || !me) return;
@@ -110,6 +166,7 @@ const Cloud = (() => {
   }
   // この端末の共有をやめる：サーバーの端末一覧からも外す（つながらないときは、この端末だけ外す）
   async function leave() {
+    try { await pushOff(); } catch { }
     try { await removeDevice((await info()).me.deviceId); } catch { }
     await disconnect();
   }
@@ -245,7 +302,8 @@ const Cloud = (() => {
   const pending = async () => (await DB.all('outbox')).length;
 
   return {
-    available, enabled, init, create, join, joinDevice, disconnect, leave, info, invite, deviceInvite, removeMember, removeDevice, mergeMember, syncMe,
+    available, enabled, init, ready, create, join, joinDevice, disconnect, leave, info, invite, deviceInvite, removeMember, removeDevice, mergeMember, syncMe,
+    renameMember, renameDevice, renameFamily, claimOwner, pushSupported, pushSubscription, pushOn, pushOff, pushRefresh,
     fetchBlob, syncNow, get, pending, state: st,
     on: f => { listeners.add(f); return () => listeners.delete(f); },
     hooks,

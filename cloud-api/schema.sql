@@ -71,3 +71,15 @@ CREATE TABLE IF NOT EXISTS blobs (
   created INTEGER NOT NULL,
   PRIMARY KEY (family_id, id)
 );
+
+-- プッシュ通知の登録先（端末ごと）。家族が作品を追加したら、ほかの人の端末へお知らせを送る
+CREATE TABLE IF NOT EXISTS push_subs (
+  endpoint TEXT PRIMARY KEY,
+  family_id TEXT NOT NULL,
+  member_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  created INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS push_subs_family ON push_subs (family_id);

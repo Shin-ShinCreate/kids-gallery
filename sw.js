@@ -1,5 +1,5 @@
 // オフラインでも開けるようにするための Service Worker（ネット優先・つながらない時はキャッシュ）
-const CACHE = 'kids-gallery-v10';
+const CACHE = 'kids-gallery-v11';
 const ASSETS = [
   './', 'index.html', 'style.css', 'db.js', 'imaging.js', 'config.js', 'cloud.js', 'app.js', 'manifest.json', 'icon.svg',
   'icon-180.png', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png',
@@ -7,7 +7,8 @@ const ASSETS = [
   'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js',
 ];
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).catch(() => { }));
+  // 古いキャッシュではなく、サーバーから取り直して保存する（更新直後に新旧のファイルが混ざらないように）
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' })))).catch(() => { }));
   self.skipWaiting();
 });
 self.addEventListener('activate', e => {
@@ -27,4 +28,28 @@ self.addEventListener('fetch', e => {
       })
       .catch(() => caches.match(e.request, { ignoreSearch: true }))
   );
+});
+
+// ---------- お知らせ（家族が作品を追加したとき） ----------
+self.addEventListener('push', e => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data?.text() }; }
+  e.waitUntil(self.registration.showNotification(d.title || 'キッズギャラリー', {
+    body: d.body || '家族が新しい作品をしまいました',
+    icon: 'icon-192.png', badge: 'icon-192.png',
+    tag: d.tag || 'kg-new', renotify: true,
+    data: { url: d.url || '#home' },
+  }));
+});
+// お知らせを押したら、アプリを開いて、その作品を見せる
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const target = new URL('./', self.registration.scope).href + (e.notification.data?.url || '#home');
+  e.waitUntil((async () => {
+    const wins = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const w of wins) {
+      if (w.url.startsWith(self.registration.scope)) { await w.focus(); return w.navigate(target).catch(() => w.postMessage({ go: e.notification.data?.url })); }
+    }
+    return clients.openWindow(target);
+  })());
 });

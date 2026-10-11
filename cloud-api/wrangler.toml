@@ -15,3 +15,6 @@ bucket_name = "kids-gallery-blobs"
 
 [vars]
 ALLOWED_ORIGINS = "https://shin-shincreate.github.io,http://localhost:8765,http://127.0.0.1:8765"
+# プッシュ通知（作品が追加されたときのお知らせ）の公開鍵。秘密鍵は `wrangler secret put VAPID_PRIVATE_KEY` で登録する
+VAPID_PUBLIC_KEY = "BJ002B3dVhZ0UBLzIOR-iiZB-bnayMOvPmgBDAI4xfno9mdrXq4pp6-Yc8zzVPZKsJk4MfvrNhGpKgKF61Ky6e8"
+VAPID_SUBJECT = "https://shin-shincreate.github.io/kids-gallery/"
