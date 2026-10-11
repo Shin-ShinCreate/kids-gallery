@@ -98,6 +98,16 @@ const Cloud = (() => {
   const deviceInvite = () => json('/api/device-invite', { method: 'POST' });
   const removeMember = id => request('/api/members/' + id, { method: 'DELETE' });
   const removeDevice = id => request('/api/devices/' + id, { method: 'DELETE' });
+  // 同じ人が2人いるとき、fromId の人を intoId の人にまとめる（端末は引き継がれる）
+  const mergeMember = (fromId, intoId) => request('/api/members/' + fromId + '/merge', { method: 'POST', body: { into: intoId } });
+  // サーバーが教えてくれた「自分」の情報と、この端末に覚えている情報がずれていたら直す（まとめられたあとなど）
+  async function syncMe(me) {
+    if (!cfg || !me) return;
+    if (cfg.memberId !== me.id || cfg.memberName !== me.name || cfg.role !== me.role) {
+      cfg.memberId = me.id; cfg.memberName = me.name; cfg.role = me.role;
+      await save();
+    }
+  }
   // この端末の共有をやめる：サーバーの端末一覧からも外す（つながらないときは、この端末だけ外す）
   async function leave() {
     try { await removeDevice((await info()).me.deviceId); } catch { }
@@ -235,7 +245,7 @@ const Cloud = (() => {
   const pending = async () => (await DB.all('outbox')).length;
 
   return {
-    available, enabled, init, create, join, joinDevice, disconnect, leave, info, invite, deviceInvite, removeMember, removeDevice,
+    available, enabled, init, create, join, joinDevice, disconnect, leave, info, invite, deviceInvite, removeMember, removeDevice, mergeMember, syncMe,
     fetchBlob, syncNow, get, pending, state: st,
     on: f => { listeners.add(f); return () => listeners.delete(f); },
     hooks,

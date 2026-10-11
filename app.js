@@ -4,8 +4,8 @@
                 ⑧年齢・学年の自動付与 ⑨名言帳／言い間違い辞典 ⑩プレゼントカード ⑳まるごと書き出し */
 
 // アプリのバージョン（「このアプリについて」に表示。機能を変えたら更新する）
-const APP_VERSION = '1.2.1';
-const APP_VERSION_DATE = '2026-10-10';
+const APP_VERSION = '1.3.0';
+const APP_VERSION_DATE = '2026-10-11';
 
 // ---------- 小さな道具 ----------
 const $ =(s, el = document) => el.querySelector(s);
@@ -1537,13 +1537,14 @@ async function cloudPanel() {
     $('#cLeave').onclick = leaveCloud;
     return;
   }
+  Cloud.syncMe(inf.me);
   const owner = inf.me.role === 'owner';
   const pct = Math.min(100, Math.round(inf.usage.bytes / inf.usage.limit * 100));
   const st = CLOUD_STATE[Cloud.state.state] || CLOUD_STATE.idle;
   el.innerHTML = head + `
     <p><b>${esc(inf.family.name)}</b>　<span class="hint">あなた：${esc(inf.me.name)}${owner ? '（つくった人）' : ''}</span></p>
     <p class="hint" id="cState">${st[0]} ${st[1]}${Cloud.state.last ? '　最後の同期 ' + new Date(Cloud.state.last).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : ''}</p>
-    <div class="members">${inf.members.map(m => `<div class="member"><span>${m.role === 'owner' ? '👑' : '👤'} ${esc(m.name)}${m.id === inf.me.id ? '（あなた）' : ''}</span>${owner && m.id !== inf.me.id ? `<button class="btn small danger" data-rm="${m.id}" data-name="${esc(m.name)}">外す</button>` : ''}</div>`).join('')}</div>
+    <div class="members">${inf.members.map(m => `<div class="member"><span>${m.role === 'owner' ? '👑' : '👤'} ${esc(m.name)}${m.id === inf.me.id ? '（あなた）' : ''}</span>${owner && m.id !== inf.me.id && m.role !== 'owner' ? `<span class="row member-act">${inf.members.length > 1 ? `<button class="btn small" data-merge="${m.id}" data-name="${esc(m.name)}">同じ人をまとめる</button>` : ''}<button class="btn small danger" data-rm="${m.id}" data-name="${esc(m.name)}">外す</button></span>` : ''}</div>`).join('')}</div>
     <button class="btn primary wide" id="cInvite">✉️ 家族を招待する</button>
     <h3>📱 あなたの端末</h3>
     <div class="members">${(inf.devices || []).map(d => `<div class="member"><span>${d.id === inf.me.deviceId ? '📍' : '📱'} ${esc(d.name)}${d.id === inf.me.deviceId ? '（この端末）' : ''}<br><small class="hint">最後に使った日：${new Date(d.last_seen).toLocaleDateString('ja-JP')}</small></span>${d.id !== inf.me.deviceId ? `<button class="btn small danger" data-rmdev="${d.id}" data-name="${esc(d.name)}">外す</button>` : ''}</div>`).join('')}</div>
@@ -1563,12 +1564,42 @@ async function cloudPanel() {
       try { await Cloud.removeDevice(b.dataset.rmdev); toast('外しました'); cloudPanel(); } catch (e) { toast(e.message, 4000); }
     };
   });
+  $$('[data-merge]').forEach(b => { b.onclick = () => cloudMergeModal(b.dataset.merge, b.dataset.name, inf.members); });
   $$('[data-rm]').forEach(b => {
     b.onclick = async () => {
-      if (!confirm(`「${b.dataset.name}」さんを家族から外しますか？\n（その人のスマホからは、新しい作品が見られなくなります）`)) return;
+      if (!confirm(`「${b.dataset.name}」さんを家族から外しますか？\n・その人の端末は、すべて使えなくなります\n・家族の作品は消えません\n（同じ人が2人いるだけのときは、「同じ人をまとめる」を使うと、端末をそのまま使えます）`)) return;
       try { await Cloud.removeMember(b.dataset.rm); toast('外しました'); cloudPanel(); } catch (e) { toast(e.message, 4000); }
     };
   });
+}
+
+// 同じ人が2人いるとき：1人にまとめる（まとめる側の端末は、まとめ先の端末になる）
+function cloudMergeModal(fromId, fromName, members) {
+  const targets = members.filter(x => x.id !== fromId);
+  const m = openModal(`<h2>👥 同じ人をまとめる</h2>
+    <p>「<b>${esc(fromName)}</b>」を、次の人にまとめます。</p>
+    <form id="mForm" class="form">
+      <label>まとめ先（この名前が残ります）<select name="into" required>${targets.map(x => `<option value="${x.id}">${x.role === 'owner' ? '👑 ' : '👤 '}${esc(x.name)}${x.role === 'owner' ? '（つくった人）' : ''}</option>`).join('')}</select></label>
+      <div class="banner">
+        <b>まとめる前に確認してください</b>
+        <ul class="steps">
+          <li>同じ人なのは、本当にこの2人ですか？（<b>元に戻せません</b>）</li>
+          <li>「${esc(fromName)}」の名前は一覧から消え、その端末は、まとめ先の端末として引き続き使えます（つなぎなおしは要りません）。</li>
+          <li>家族の作品・ことばは、<b>消えません</b>。</li>
+          <li>つなげられる端末は、まとめ先が10台までです。</li>
+        </ul>
+      </div>
+      <div class="row"><button class="btn primary">まとめる</button><button type="button" class="btn" id="mX">やめる</button></div></form>`);
+  $('#mX', m).onclick = closeModal;
+  $('#mForm', m).onsubmit = async e => {
+    e.preventDefault();
+    const into = new FormData(e.target).get('into'), btn = e.submitter;
+    btn.disabled = true;
+    try {
+      await Cloud.mergeMember(fromId, into);
+      closeModal(); toast('まとめました'); cloudPanel();
+    } catch (err) { toast(err.message, 5000); btn.disabled = false; }
+  };
 }
 
 async function leaveCloud() {

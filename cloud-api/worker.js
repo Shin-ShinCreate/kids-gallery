@@ -122,6 +122,8 @@ async function route(req, env, url) {
 
   let m = /^\/api\/members\/([\w-]+)$/.exec(p);
   if (m && method === 'DELETE') return removeMember(env, me, m[1]);
+  m = /^\/api\/members\/([\w-]+)\/merge$/.exec(p);
+  if (m && method === 'POST') return mergeMember(req, env, me, m[1]);
   m = /^\/api\/devices\/([\w-]+)$/.exec(p);
   if (m && method === 'DELETE') return removeDevice(env, me, m[1]);
   m = /^\/api\/blob\/([\w-]+)$/.exec(p);
@@ -237,6 +239,35 @@ async function removeMember(env, me, id) {
   const r = await env.DB.prepare('UPDATE members SET revoked = 1 WHERE id = ? AND family_id = ? AND role != ?')
     .bind(id, me.family_id, 'owner').run();
   if (!r.meta.changes) fail(404, 'メンバーが見つかりません');
+  return json({ ok: true });
+}
+
+// 同じ人が2人いるとき（端末を追加する機能ができる前に、端末ごとに参加したため）、1人にまとめる。
+// 「まとめる側」の端末は、そのまま「まとめ先」の端末になる（端末の再設定は要らない）。作品は家族のものなので、消えない。
+async function mergeMember(req, env, me, fromId) {
+  if (me.role !== 'owner') fail(403, 'まとめられるのは、家族をつくった人だけです');
+  const b = await readJson(req);
+  const toId = String(b.into || '');
+  if (!toId || toId === fromId) fail(400, 'まとめ先を選んでください');
+  const rows = (await env.DB.prepare(
+    'SELECT id, role, token_hash FROM members WHERE family_id = ? AND revoked = 0 AND id IN (?, ?)'
+  ).bind(me.family_id, fromId, toId).all()).results;
+  const from = rows.find(r => r.id === fromId), to = rows.find(r => r.id === toId);
+  if (!from || !to) fail(404, 'メンバーが見つかりません');
+  if (from.role === 'owner') fail(400, '家族をつくった人は、ほかの人にまとめられません。まとめ先を「つくった人」にしてください');
+  const legacy = r => (String(r.token_hash).startsWith('moved:') ? 0 : 1); // 端末の表に引っ越す前の合言葉
+  const n = (await env.DB.prepare('SELECT COUNT(*) AS n FROM devices WHERE member_id IN (?, ?) AND revoked = 0').bind(fromId, toId).first()).n;
+  if (n + legacy(from) + legacy(to) > MAX_DEVICES) fail(400, `まとめると端末が${MAX_DEVICES}台をこえます。使わない端末を先に外してください`);
+  const now = Date.now();
+  await env.DB.batch([
+    // 引っ越す前の合言葉は、まとめ先の端末として移す
+    env.DB.prepare("INSERT OR IGNORE INTO devices (id, member_id, name, token_hash, created, last_seen) SELECT lower(hex(randomblob(16))), ?, 'まとめる前の端末', token_hash, ?, ? FROM members WHERE id = ? AND token_hash NOT LIKE 'moved:%'")
+      .bind(toId, now, now, fromId),
+    env.DB.prepare("UPDATE members SET token_hash = 'moved:' || id WHERE id = ?").bind(fromId),
+    env.DB.prepare('UPDATE devices SET member_id = ? WHERE member_id = ?').bind(toId, fromId),
+    env.DB.prepare('DELETE FROM device_invites WHERE member_id = ?').bind(fromId),
+    env.DB.prepare('UPDATE members SET revoked = 1 WHERE id = ?').bind(fromId),
+  ]);
   return json({ ok: true });
 }
 

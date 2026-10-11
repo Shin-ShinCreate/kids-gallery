@@ -321,7 +321,8 @@ input.mini { font-size: 13px; padding: 7px 10px; border-radius: 0; border: 0; bo
 .cloud-badge.syncing { animation: spin 1.2s linear infinite; display: inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .members { margin: 8px 0; }
-.member { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.member { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.member > span:first-child { flex: 1 1 150px; min-width: 0; }
 .usage { margin: 10px 0 14px; }
 .usage .bar { height: 8px; border-radius: 999px; background: #f0e2d2; overflow: hidden; }
 .usage .bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
@@ -341,3 +342,4 @@ input.mini { font-size: 13px; padding: 7px 10px; border-radius: 0; border: 0; bo
 
 /* 自作のアイコン（積み木）：まわりの文字の大きさに合わせる */
 .ic { width: 1em; height: 1em; display: inline-block; vertical-align: -0.14em; }
+.member-act { flex: none; flex-wrap: nowrap; margin: 0 0 0 auto; gap: 6px; justify-content: flex-end; }
