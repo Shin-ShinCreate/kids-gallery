@@ -1,5 +1,5 @@
 // オフラインでも開けるようにするための Service Worker（ネット優先・つながらない時はキャッシュ）
-const CACHE = 'kids-gallery-v11';
+const CACHE = 'kids-gallery-v12';
 const ASSETS = [
   './', 'index.html', 'style.css', 'db.js', 'imaging.js', 'config.js', 'cloud.js', 'app.js', 'manifest.json', 'icon.svg',
   'icon-180.png', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png',
@@ -35,7 +35,7 @@ self.addEventListener('push', e => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data?.text() }; }
   e.waitUntil(self.registration.showNotification(d.title || 'キッズギャラリー', {
-    body: d.body || '家族が新しい作品をしまいました',
+    body: d.body || '家族が新しい作品を保存しました',
     icon: 'icon-192.png', badge: 'icon-192.png',
     tag: d.tag || 'kg-new', renotify: true,
     data: { url: d.url || '#home' },

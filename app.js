@@ -4,8 +4,8 @@
                 ⑧年齢・学年の自動付与 ⑨名言帳／言い間違い辞典 ⑩プレゼントカード ⑳まるごと書き出し */
 
 // アプリのバージョン（「このアプリについて」に表示。機能を変えたら更新する）
-const APP_VERSION = '1.4.0';
-const APP_VERSION_DATE = '2026-10-11';
+const APP_VERSION = '1.5.0';
+const APP_VERSION_DATE = '2026-10-27';
 
 // ---------- 小さな道具 ----------
 const $ =(s, el = document) => el.querySelector(s);
@@ -246,11 +246,8 @@ async function home() {
   ${nudge}
   ${needBackup ? `<a class="banner" href="#settings/backup">💾 ${last ? '前回のバックアップから30日以上たちました' : 'まだ一度も書き出していません'}。思い出を守るために書き出しましょう →</a>` : ''}
   <section class="quick">
-    <a href="#add" class="qa big">📷<b>作品を撮ってしまう</b></a>
-    <a href="#burst" class="qa">⚡<b>連続撮影</b><small>たまった作品を一気に</small></a>
-    <a href="#words/new" class="qa">💬<b>ことば</b><small>名言・言い間違い</small></a>
-    <a href="#add/present" class="qa">🎁<b>プレゼント</b><small>もらった物と言葉</small></a>
-    <a href="#boxes" class="qa">📦<b>現物の保管</b><small>箱とQRラベル</small></a>
+    <a href="#add" class="qa big">📷<b>このアプリに保存</b></a>
+    <a href="#boxes" class="qa wide">📦<b>現物の保管</b><small>箱とQRラベル</small></a>
     <a href="#book" class="qa wide">📕<b>作品集（ART BOOK）をつくる</b><small>自動レイアウト・A4/A5・PDFで保存</small></a>
   </section>
   ${mem.length ? `<section><h2>📅 思い出のこの日</h2><div class="mem-list">${mem.map(i => {
@@ -259,11 +256,11 @@ async function home() {
     return `<div class="mem"><div class="mem-tag">${n}年前${exact ? 'の今日' : 'のこのころ'}</div>${card(i)}</div>`;
   }).join('')}</div></section>` : ''}
   <section class="stats">
-    <div><b>${items.length}</b><span>しまった思い出</span></div>
+    <div><b>${items.length}</b><span>保存した思い出</span></div>
     <div><b>${things.filter(i => i.status === 'keep').length}</b><span>現物を保管中</span></div>
     <div><b>${things.filter(i => i.status === 'released').length}</b><span>手放せた現物</span></div>
   </section>
-  <section><h2>さいきん しまったもの${recent.length ? '<a class="more-link push" href="#gallery">すべて見る ›</a>' : ''}</h2>${recent.length ? `<div class="grid">${recent.map(card).join('')}</div>` : '<div class="empty-card"><div class="empty-ic">📷</div><p>まだありません。まずは1枚撮ってみましょう！</p><a class="btn primary" href="#add">＋ しまう</a></div>'}</section>`;
+  <section><h2>さいきん 保存したもの${recent.length ? '<a class="more-link push" href="#gallery">すべて見る ›</a>' : ''}</h2>${recent.length ? `<div class="grid">${recent.map(card).join('')}</div>` : '<div class="empty-card"><div class="empty-ic">📷</div><p>まだありません。まずは1枚撮ってみましょう！</p><a class="btn primary" href="#add">＋ 保存</a></div>'}</section>`;
   bindChildChips(home);
   bindInstall();
   bindNotifyNudge();
@@ -273,7 +270,7 @@ async function home() {
 function onboarding() {
   view().innerHTML = `
   <section class="hero"><div class="hero-ic">🖼️</div><h1>キッズギャラリー</h1>
-  <p>平面・立体・文字・プチ記念・プレゼント・ことば…<br>捨てられない思い出を、写真でしまっておく場所です。</p></section>
+  <p>平面・立体・文字・プチ記念・プレゼント・ことば…<br>捨てられない思い出を、写真で保存しておく場所です。</p></section>
   ${installCard()}
   ${Cloud.available() && !Cloud.enabled() ? `<section class="panel"><h2>👨‍👩‍👧 すでに家族で使っていますか？</h2>
     <p class="hint">ほかの端末や、家族がもう使っているときは、お子さんを登録しなくても、つなぐだけで作品が届きます。</p>
@@ -330,7 +327,7 @@ async function gallery() {
   <div class="chips small" id="statusChips">${statusChips.map(([k, l]) => `<button class="chip ${G.status === k ? 'on' : ''}" data-s="${k}">${l}</button>`).join('')}</div>
   ${items.length ? [...groups].map(([fy, list]) => `<section>${header(fy, list)}<div class="grid">${list.map(card).join('')}</div></section>`).join('')
     : S.items.some(i => i.type !== 'word') ? '<p class="empty">この条件に合う作品はありません</p>'
-    : '<div class="empty-card"><div class="empty-ic">🖼️</div><p>まだ作品がありません。<br>下の「＋」から、しまってみましょう。</p><a class="btn primary" href="#add">＋ しまう</a></div>'}`;
+    : '<div class="empty-card"><div class="empty-ic">🖼️</div><p>まだ作品がありません。<br>下の「＋」から、保存してみましょう。</p><a class="btn primary" href="#add">＋ 保存</a></div>'}`;
   bindChildChips(gallery);
   $$('#typeChips .chip').forEach(b => { b.onclick = () => { G.type = b.dataset.t; gallery(); }; });
   $$('#statusChips .chip').forEach(b => { b.onclick = () => { G.status = b.dataset.s; gallery(); }; });
@@ -413,7 +410,7 @@ async function add(type) {
   if (!S.children.length) return go('#home');
   if (type === 'word') return go('#words/new');
   if (!type || !TYPES[type]) {
-    view().innerHTML = `<h1 class="page-title">何をしまう？</h1>
+    view().innerHTML = `<h1 class="page-title">何を保存する？</h1>
     <p class="hint lead">種類を選ぶと、写真を撮る画面に進みます。</p>
     <div class="type-grid">${Object.entries(TYPES).map(([k, v]) => `<a class="type-btn" href="${k === 'word' ? '#words/new' : '#add/' + k}"><span>${v.icon}</span>${v.label}<small>${v.ex}</small></a>`).join('')}</div>
     <a class="btn wide" href="#burst">⚡ たくさんある時は「連続撮影」</a>`;
@@ -436,7 +433,7 @@ async function edit(id) {
 function renderForm(d, isNew) {
   const T = TYPES[d.type];
   d._removed = [];
-  view().innerHTML = `<h1 class="page-title">${T.icon} ${T.label}を${isNew ? 'しまう' : '編集'}</h1>
+  view().innerHTML = `<h1 class="page-title">${T.icon} ${T.label}を${isNew ? '保存する' : '編集'}</h1>
   <section class="panel"><h2>写真 <small>${d.type === 'craft' ? 'いろんな角度から何枚でも' : '複数枚OK'}</small></h2>
     <div class="photo-strip" id="photoStrip"></div></section>
   <form id="itemForm" class="form panel">
@@ -450,9 +447,9 @@ function renderForm(d, isNew) {
     <div id="recRow"></div>
     ${isNew ? `<div class="save-choices">
       <p class="hint">現物はどうしますか？</p>
-      <button class="btn primary" value="keep">📦 しまう（現物も保管する）</button>
-      <button class="btn ritual" value="release">🕊️ しまって「ありがとう、さようなら」</button>
-      <button class="btn" value="jikka">🏠 しまう（現物は実家へ送る）</button></div>`
+      <button class="btn primary" value="keep">📦 保存する（現物も保管する）</button>
+      <button class="btn ritual" value="release">🕊️ 保存して「ありがとう、さようなら」</button>
+      <button class="btn" value="jikka">🏠 保存する（現物は実家へ送る）</button></div>`
       : `<button class="btn primary wide" value="save">保存</button>`}
   </form>`;
 
@@ -498,7 +495,7 @@ function renderForm(d, isNew) {
     await saveItem(d);
     await gcBlobs(removed, S.items);
     if (act === 'release') return go('#ritual/' + d.id);
-    toast('しまいました');
+    toast('保存しました');
     go('#item/' + d.id);
   };
 }
@@ -795,7 +792,7 @@ function burstReview() {
     </form>
     <p class="hint">写真をタップすると切り抜きをやり直せます。</p>
     <div class="grid" id="bGrid">${burstShots.map((s, k) => `<div class="card"><div class="thumb"><img src="${s.url}" data-k="${k}" class="re" alt=""><button type="button" class="x" data-k="${k}" aria-label="削除">✕</button></div><input class="mini" data-k="${k}" placeholder="題名（任意）" value="${esc(s.title)}"></div>`).join('')}</div>
-    <button class="btn primary wide" id="bSave">${burstShots.length}点をしまう</button>`;
+    <button class="btn primary wide" id="bSave">${burstShots.length}点を保存する</button>`;
     const form = $('#bForm');
     bindAgePreview(form);
     const st = form.querySelector('[name=status]');
@@ -830,7 +827,7 @@ function burstReview() {
       burstShots.forEach(s => URL.revokeObjectURL(s.url));
       burstShots = [];
       if (status === 'released') { S.ritualIds = ids; return go('#ritual/batch'); }
-      toast(`${ids.length}点をしまいました`);
+      toast(`${ids.length}点を保存しました`);
       go('#gallery');
     };
   };
@@ -852,7 +849,7 @@ async function ritual(id) {
   hydrate(view());
   let thanks = null;
   const step2 = () => {
-    $('#rText').innerHTML = `<h1>${thanks ? '🎙️ 声をしまいました' : 'じゅんびOK'}</h1><p>いっしょにボタンを押してね</p>`;
+    $('#rText').innerHTML = `<h1>${thanks ? '🎙️ 声を保存しました' : 'じゅんびOK'}</h1><p>いっしょにボタンを押してね</p>`;
     $('#rBtns').innerHTML = `<button class="btn ritual big" id="rBye">🕊️ さようなら</button>`;
     $('#rBye').onclick = finish;
   };
@@ -1063,7 +1060,7 @@ async function settings(sub) {
   view().innerHTML = `<h1 class="page-title">設定</h1>
   <nav class="menu">
     ${menuRow('#settings/family', '👨‍👩‍👧', '家族で共有', !Cloud.available() ? '準備中' : cfg ? `${esc(cfg.familyName)}・あなたは「${esc(cfg.memberName)}」` : 'まだつながっていません')}
-    ${menuRow('#settings/notify', '🔔', 'お知らせ', pushOn ? 'この端末で受け取っています' : '家族が作品をしまったら、通知でお知らせ')}
+    ${menuRow('#settings/notify', '🔔', 'お知らせ', pushOn ? 'この端末で受け取っています' : '家族が作品を保存したら、通知でお知らせ')}
     ${menuRow('#settings/children', '👧', 'こども', S.children.map(c => esc(c.name)).join('・') || 'まだ登録していません')}
   </nav>
   <nav class="menu">
@@ -1288,7 +1285,7 @@ async function book(childId) {
   view().innerHTML = `<div class="no-print">
     <h1 class="page-title">📕 作品集（ART BOOK）</h1>
     ${S.children.length > 1 ? `<div class="chips">${S.children.map(x => `<a class="chip ${x.id === cid ? 'on' : ''}" style="--cc:${x.color}" href="#book/${x.id}">${esc(x.name)}</a>`).join('')}</div>` : ''}
-    ${!all.length ? `<p class="empty">${esc(c.name)}の、写真つきの作品がまだありません。<br>作品をしまうと、ここで自動で作品集になります。</p>` : `
+    ${!all.length ? `<p class="empty">${esc(c.name)}の、写真つきの作品がまだありません。<br>作品を保存すると、ここで自動で作品集になります。</p>` : `
     <section class="panel"><h2>① しあげ</h2>
       <div class="opt"><span>サイズ</span><div class="seg" data-g="opt">${opt('size', 'A4', 'A4（大きめ）')}${opt('size', 'A5', 'A5（持ち運び）')}</div></div>
       <div class="opt"><span>しあげ</span><div class="seg" data-g="opt">${opt('finish', 'standard', 'スタンダード')}${opt('finish', 'premium', '✨プレミアム')}</div></div>
@@ -1622,7 +1619,7 @@ async function cloudPanel() {
       <button class="btn wide" id="cDevAdd">📲 別の端末を追加する</button>
       <p class="hint">スマホ・タブレット・パソコンなど、同じ人が使う端末を、招待をもらいなおさずに追加できます。</p>
     </section>
-    <a class="panel menu-row solo" href="#settings/notify"><span class="menu-ic">🔔</span><span class="menu-txt"><b>お知らせ</b><small>${pushOn ? 'この端末で受け取っています' : '家族が作品をしまったら、通知でお知らせ'}</small></span><span class="chev">›</span></a>
+    <a class="panel menu-row solo" href="#settings/notify"><span class="menu-ic">🔔</span><span class="menu-txt"><b>お知らせ</b><small>${pushOn ? 'この端末で受け取っています' : '家族が作品を保存したら、通知でお知らせ'}</small></span><span class="chev">›</span></a>
     <section class="panel">
       <div class="usage"><div class="bar"><i style="width:${Math.max(pct, inf.usage.bytes ? 1 : 0)}%"></i></div>
         <small>クラウドの使用量 ${fmtMB(inf.usage.bytes)} / ${fmtMB(inf.usage.limit)}（写真${inf.usage.files}ファイル）</small></div>
@@ -1639,7 +1636,7 @@ async function cloudPanel() {
   const fr = $('#cFamRename');
   if (fr) fr.onclick = () => nameModal('家族の名前を変える', inf.family.name, 'みんなの画面に表示されます。', async n => { await Cloud.renameFamily(n); }, reload);
   const rm = $('[data-rename-me]');
-  if (rm) rm.onclick = () => nameModal('あなたの名前を変える', inf.me.name, '家族の一覧や、お知らせ（「◯◯が しまいました」）に出る名前です。', async n => { await Cloud.renameMember(inf.me.id, n); }, reload);
+  if (rm) rm.onclick = () => nameModal('あなたの名前を変える', inf.me.name, '家族の一覧や、お知らせ（「◯◯が 保存しました」）に出る名前です。', async n => { await Cloud.renameMember(inf.me.id, n); }, reload);
   $$('[data-member]').forEach(b => { b.onclick = () => memberModal(inf.members.find(m => m.id === b.dataset.member), inf); });
   $$('[data-device]').forEach(b => { b.onclick = () => deviceModal(inf.devices.find(d => d.id === b.dataset.device), inf); });
 }
@@ -1732,7 +1729,7 @@ async function notifyPanel() {
   await Cloud.ready?.(); // 古い cloud.js と混ざっても止まらないように
   const el = $('#notifyPanel');
   if (!el) return;
-  const intro = '<p>家族のだれかが作品やことばをしまったとき、<b>この端末にお知らせ</b>が届きます。<br><span class="hint">自分でしまったときは届きません。端末ごとに設定します。</span></p>';
+  const intro = '<p>家族のだれかが作品やことばを保存したとき、<b>この端末にお知らせ</b>が届きます。<br><span class="hint">自分で保存したときは届きません。端末ごとに設定します。</span></p>';
   if (!Cloud.enabled()) {
     el.innerHTML = intro + '<p class="banner">お知らせは「家族で共有」につなぐと使えます。</p><a class="btn primary wide" href="#settings/family">👨‍👩‍👧 家族で共有へ</a>';
     return;
@@ -1766,7 +1763,7 @@ async function notifyPanel() {
   if (testB) testB.onclick = async () => {
     try {
       const reg = await navigator.serviceWorker.ready;
-      await reg.showNotification('キッズギャラリー', { body: 'これはテストのお知らせです。家族が作品をしまうと、このように届きます。', icon: 'icon-192.png', tag: 'kg-test' });
+      await reg.showNotification('キッズギャラリー', { body: 'これはテストのお知らせです。家族が作品を保存すると、このように届きます。', icon: 'icon-192.png', tag: 'kg-test' });
     } catch (e) { toast('テストを出せませんでした：' + e.message, 4000); }
   };
 }
@@ -1953,7 +1950,7 @@ async function notifyNudge() {
   if (!Cloud.enabled() || !Cloud.pushSupported() || Notification.permission === 'denied') return '';
   if ((await DB.get('meta', 'push')) !== undefined) return '';
   try { if (Date.now() - Number(localStorage.getItem(NUDGE_KEY) || 0) < 14 * 864e5) return ''; } catch { }
-  return `<div class="banner nudge" id="nudge"><span>🔔 家族が作品をしまったら、お知らせで受け取りませんか？</span>
+  return `<div class="banner nudge" id="nudge"><span>🔔 家族が作品を保存したら、お知らせで受け取りませんか？</span>
     <span class="row"><button class="btn small primary" id="nudgeOn">受け取る</button><button class="btn small" id="nudgeLater">あとで</button></span></div>`;
 }
 function bindNotifyNudge() {
@@ -1970,7 +1967,7 @@ function afterConnect() {
   if (!Cloud.pushSupported() || Notification.permission === 'denied') return;
   setTimeout(() => {
     const m = openModal(`<div class="center"><div class="big-ic">🔔</div><h2>お知らせを受け取りますか？</h2>
-      <p>家族が作品やことばをしまったとき、この端末に通知が届きます。</p></div>
+      <p>家族が作品やことばを保存したとき、この端末に通知が届きます。</p></div>
       <button class="btn primary wide" id="acOn">受け取る</button><button class="btn wide" id="acLater">あとで（設定からいつでも変えられます）</button>`);
     $('#acLater', m).onclick = closeModal;
     $('#acOn', m).onclick = async () => {
@@ -1983,10 +1980,10 @@ function afterConnect() {
 
 // ---------- はじめての案内（ツアー） ----------
 const TOUR = [
-  { ic: '🖼️', t: 'キッズギャラリーへようこそ', d: '子どもの作品・ことば・プレゼントを、写真に撮って<b>「しまって」</b>おくアプリです。現物を減らしても、思い出は残せます。' },
-  { ic: '＋', t: '下の「＋」で しまう', d: '種類（平面・立体・文字など）を選んで、撮るだけ。<b>年齢と学年は自動</b>で付きます。たくさんあるときは「連続撮影」が便利です。' },
+  { ic: '🖼️', t: 'キッズギャラリーへようこそ', d: '子どもの作品・ことば・プレゼントを、写真に撮って<b>「保存」</b>しておくアプリです。現物を減らしても、思い出は残せます。' },
+  { ic: '＋', t: '下の「＋」で 保存する', d: '種類（平面・立体・文字など）を選んで、撮るだけ。<b>年齢と学年は自動</b>で付きます。たくさんあるときは「連続撮影」が便利です。' },
   { ic: '📦', t: '現物は、どうする？', d: '<b>手元に保管</b>・<b>実家へ送る</b>・<b>「ありがとう、さようなら」で手放す</b>から選べます。保管箱にはQRラベルを貼れます。' },
-  { ic: '👨‍👩‍👧', t: '家族で共有・お知らせ', d: '招待コードで家族とつながると、同じギャラリーを見られます。家族が作品をしまうと、<b>お知らせ</b>で届きます。' },
+  { ic: '👨‍👩‍👧', t: '家族で共有・お知らせ', d: '招待コードで家族とつながると、同じギャラリーを見られます。家族が作品を保存すると、<b>お知らせ</b>で届きます。' },
   { ic: '💾', t: '思い出を守る', d: 'ときどき<b>「まるごと書き出し」</b>をすると安心です。作品集（PDF）もつくれます。迷ったら、右上の<b>「？」</b>から使い方を見られます。' },
 ];
 function tour(k = 0) {
@@ -2012,12 +2009,12 @@ function tour(k = 0) {
 // ---------- 使い方 ----------
 const HELP = [
   ['はじめに', [
-    ['このアプリでできること', '子どもの作品（平面・立体・文字・プチ記念）、プレゼント、ことばを、写真や文字で「しまって」おけます。年齢・学年は自動で付き、家族と共有したり、作品集にしたりできます。'],
+    ['このアプリでできること', '子どもの作品（平面・立体・文字・プチ記念）、プレゼント、ことばを、写真や文字で「保存」しておけます。年齢・学年は自動で付き、家族と共有したり、作品集にしたりできます。'],
     ['ホーム画面に追加する', 'アイコンをホーム画面に置くと、アプリのようにすぐ開けます。<br>⚙️ 設定 →「ホーム画面に追加」で、あなたの端末に合った手順が出ます。<br><b>iPhone：</b>Safariの共有ボタン（□に↑）→「ホーム画面に追加」。'],
     ['こどもを登録・編集する', '⚙️ 設定 →「こども」。誕生日を入れると、作品に年齢と学年が自動で付きます。'],
   ]],
-  ['しまう', [
-    ['作品をしまう', '① 下の<b>「＋」</b>を押す ② 種類を選ぶ ③「撮る」か「選ぶ」で写真を入れる ④ だれの・いつ・題名を入れて、現物をどうするか選ぶ。'],
+  ['保存する', [
+    ['作品を保存する', '① 下の<b>「＋」</b>を押す ② 種類を選ぶ ③「撮る」か「選ぶ」で写真を入れる ④ だれの・いつ・題名を入れて、現物をどうするか選ぶ。'],
     ['たくさんあるとき（連続撮影）', '「＋」→「たくさんある時は連続撮影」。作品を置いて手をどけると、自動で撮れます。最後にまとめて整理できます。'],
     ['写真のゆがみ・明るさ', '撮ると自動で四隅を見つけて、まっすぐ・白く整えます。うまくいかないときは、四隅の点を指で動かしたり、回転・明るさを調整できます。'],
     ['ことばを残す', '下の「ことば」→「＋ ことばを残す」。音声入力や、本人の声の録音もできます。言い間違いにチェックすると「言い間違い辞典」に並びます。'],
@@ -2035,7 +2032,7 @@ const HELP = [
     ['つくった人の端末をなくしたとき', '「家族で共有」のいちばん下「つくった人の端末をなくしたとき」から、設定キーを入れると、あなたが「つくった人」になります。'],
   ]],
   ['お知らせ', [
-    ['お知らせを受け取る', '⚙️ 設定 →「お知らせ」→「お知らせを受け取る」→「許可」。家族が作品をしまうと、この端末に通知が届きます（自分でしまったときは届きません）。'],
+    ['お知らせを受け取る', '⚙️ 設定 →「お知らせ」→「お知らせを受け取る」→「許可」。家族が作品を保存すると、この端末に通知が届きます（自分で保存したときは届きません）。'],
     ['iPhone・iPadでのお知らせ', 'ホーム画面のアイコンから開いたときだけ使えます（iOS 16.4以降）。先に「ホーム画面に追加」してから、アイコンで開いて設定してください。'],
     ['お知らせが来ない', '① 設定の「お知らせ」が「受け取っています」か ② 端末の設定で、このアプリの通知が許可されているか ③「テストのお知らせを出す」で表示されるか、を確かめてください。'],
   ]],

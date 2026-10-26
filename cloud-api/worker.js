@@ -352,10 +352,10 @@ async function notifyNewItems(env, me, items) {
     const what = d.type === 'word'
       ? `ことば「${String(d.word?.text || '').slice(0, 30)}」`
       : `${TYPE_LABEL[d.type] || '作品'}「${String(d.title || TYPE_LABEL[d.type] || '').slice(0, 30)}」`;
-    body = `${me.name}が ${what} をしまいました`;
+    body = `${me.name}が ${what} を保存しました`;
     url = '#item/' + d.id;
   } else {
-    body = `${me.name}が ${items.length}点 しまいました`;
+    body = `${me.name}が ${items.length}点 保存しました`;
   }
   const payload = JSON.stringify({ title: 'キッズギャラリー', body, url, tag: 'kg-new-' + me.family_id });
   const gone = [];

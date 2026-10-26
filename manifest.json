@@ -1,7 +1,7 @@
 {
   "name": "キッズギャラリー",
   "short_name": "キッズギャラリー",
-  "description": "捨てられない子どもの作品・ことば・プレゼントを写真でしまっておくアプリ",
+  "description": "捨てられない子どもの作品・ことば・プレゼントを写真で保存しておくアプリ",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
